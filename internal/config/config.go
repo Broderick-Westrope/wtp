@@ -42,7 +42,7 @@ const (
 	// CurrentVersion represents the current configuration version written to disk.
 	CurrentVersion = "1.0"
 	// DefaultBaseDir is the default directory for new worktrees relative to a repository.
-	DefaultBaseDir = "../worktrees"
+	DefaultBaseDir = "worktrees"
 	// HookTypeCopy identifies a hook that copies files.
 	HookTypeCopy = "copy"
 	// HookTypeCommand identifies a hook that executes a command.
@@ -70,7 +70,7 @@ func LoadConfig(repoRoot string) (*Config, error) {
 		return &Config{
 			Version: CurrentVersion,
 			Defaults: Defaults{
-				BaseDir: "../worktrees",
+				BaseDir: "worktrees",
 			},
 			Hooks: Hooks{},
 		}, nil
