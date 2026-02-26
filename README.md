@@ -19,10 +19,11 @@ no path errors.
 
 **git-worktree pain:** Remove worktree, then manually delete the branch. Forget
 the second step? Orphaned branches accumulate. **wtp solution:**
-`wtp remove --with-branch feature/done` - One command removes both
+`wtp remove feature/done` - One command removes both by default
 
-Keep your repository clean. When a feature is truly done, remove both the
-worktree and its branch in one atomic operation. No more forgotten branches
+Keep your repository clean. When a feature is truly done, wtp automatically
+removes both the worktree and its branch. Need to keep the branch? Use
+`wtp remove --keep-branch` to preserve it. No more forgotten branches
 cluttering your repo.
 
 ### 🛠️ Zero-Setup Development Environments
@@ -180,13 +181,14 @@ wtp list
 # feature/auth              feature/auth     def45678
 # ../project-hotfix         hotfix/urgent    abc12345
 
-# Remove worktree only (by worktree name)
-wtp remove feature/auth
-wtp remove --force feature/auth  # Force removal even if dirty
+# Remove worktree and branch (default behavior)
+wtp remove feature/auth                            # Removes worktree and branch
+wtp remove --force feature/auth                    # Force removal even if dirty
+wtp remove --force-branch feature/auth             # Force branch deletion if unmerged
 
-# Remove worktree and its branch
-wtp remove --with-branch feature/auth              # Only if branch is merged
-wtp remove --with-branch --force-branch feature/auth  # Force branch deletion
+# Remove worktree but keep the branch
+wtp remove --keep-branch feature/auth              # Removes worktree, keeps branch
+wtp remove -k feature/auth                         # Same as --keep-branch (alias)
 
 # Execute a command in an existing worktree (uses same target resolution as `wtp cd`)
 wtp exec feature/auth -- go test ./...

@@ -18,7 +18,7 @@ func TestCompleteFlagSuggestions_MatchesLongFlag(t *testing.T) {
 		Writer: &buf,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name: "with-branch",
+				Name: "keep-branch",
 			},
 			&cli.BoolFlag{
 				Name:    "force",
@@ -28,9 +28,9 @@ func TestCompleteFlagSuggestions_MatchesLongFlag(t *testing.T) {
 		},
 	}
 
-	require.True(t, completeFlagSuggestions(cmd, "--w"))
+	require.True(t, completeFlagSuggestions(cmd, "--k"))
 
-	require.Contains(t, buf.String(), "--with-branch")
+	require.Contains(t, buf.String(), "--keep-branch")
 	require.NotContains(t, buf.String(), "--generate-shell-completion")
 }
 
@@ -41,7 +41,7 @@ func TestCompleteFlagSuggestions_ShowsAllForSingleHyphen(t *testing.T) {
 		Writer: &buf,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
-				Name: "with-branch",
+				Name: "keep-branch",
 			},
 			&cli.BoolFlag{
 				Name:    "force",
@@ -53,7 +53,7 @@ func TestCompleteFlagSuggestions_ShowsAllForSingleHyphen(t *testing.T) {
 	require.True(t, completeFlagSuggestions(cmd, "-"))
 
 	output := buf.String()
-	require.True(t, strings.Contains(output, "--with-branch") || strings.Contains(output, "-with-branch"))
+	require.True(t, strings.Contains(output, "--keep-branch") || strings.Contains(output, "-keep-branch"))
 	require.True(t, strings.Contains(output, "--force") || strings.Contains(output, "-force"))
 }
 
@@ -106,18 +106,18 @@ func TestMaybeCompleteFlagSuggestions_UsesOSArgsWhenCurrentEmpty(t *testing.T) {
 	original := os.Args
 	t.Cleanup(func() { os.Args = original })
 
-	os.Args = []string{"wtp", "remove", "--w", "--generate-shell-completion"}
+	os.Args = []string{"wtp", "remove", "--k", "--generate-shell-completion"}
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{
 		Writer: &buf,
 		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: "with-branch"},
+			&cli.BoolFlag{Name: "keep-branch"},
 			&cli.BoolFlag{Name: "force"},
 			cli.GenerateShellCompletionFlag,
 		},
 	}
 
 	require.True(t, maybeCompleteFlagSuggestions(cmd, "", nil))
-	require.Contains(t, buf.String(), "--with-branch")
+	require.Contains(t, buf.String(), "--keep-branch")
 }

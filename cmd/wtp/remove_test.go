@@ -27,7 +27,7 @@ func TestNewRemoveCommand(t *testing.T) {
 	assert.NotNil(t, cmd.ShellComplete)
 
 	// Check flags exist
-	flagNames := []string{"force", "with-branch"}
+	flagNames := []string{"force", "keep-branch"}
 	for _, name := range flagNames {
 		found := false
 		for _, flag := range cmd.Flags {
@@ -172,8 +172,8 @@ func TestRemoveCommand_CommandConstruction(t *testing.T) {
 			},
 		},
 		{
-			name:         "remove with branch deletion",
-			flags:        map[string]any{"branch": true},
+			name:         "remove with default branch deletion",
+			flags:        map[string]any{},
 			worktreeName: "feature-branch",
 			mockWorktreeList: "worktree /path/to/main\nHEAD abc123\nbranch refs/heads/main\n\n" +
 				"worktree /path/to/worktrees/feature-branch\nHEAD def456\nbranch refs/heads/feature-branch\n\n",
@@ -189,6 +189,23 @@ func TestRemoveCommand_CommandConstruction(t *testing.T) {
 				{
 					Name: "git",
 					Args: []string{"branch", "-d", "feature-branch"},
+				},
+			},
+		},
+		{
+			name:         "remove keeping branch",
+			flags:        map[string]any{"keep": true},
+			worktreeName: "feature-branch",
+			mockWorktreeList: "worktree /path/to/main\nHEAD abc123\nbranch refs/heads/main\n\n" +
+				"worktree /path/to/worktrees/feature-branch\nHEAD def456\nbranch refs/heads/feature-branch\n\n",
+			expectedCommands: []command.Command{
+				{
+					Name: "git",
+					Args: []string{"worktree", "list", "--porcelain"},
+				},
+				{
+					Name: "git",
+					Args: []string{"worktree", "remove", "/path/to/worktrees/feature-branch"},
 				},
 			},
 		},
@@ -217,9 +234,9 @@ func TestRemoveCommand_CommandConstruction(t *testing.T) {
 			var buf bytes.Buffer
 
 			forceFlag := tt.flags["force"] == true
-			branchFlag := tt.flags["branch"] == true
+			keepFlag := tt.flags["keep"] == true
 			err := removeCommandWithCommandExecutor(
-				cmd, &buf, mockExec, "/test/repo", tt.worktreeName, forceFlag, branchFlag, false,
+				cmd, &buf, mockExec, "/test/repo", tt.worktreeName, forceFlag, keepFlag, false,
 			)
 
 			assert.NoError(t, err)
@@ -233,26 +250,26 @@ func TestRemoveCommand_SuccessMessage(t *testing.T) {
 	tests := []struct {
 		name           string
 		worktreeName   string
-		branchFlag     bool
+		keepFlag       bool
 		expectedOutput []string
 	}{
 		{
-			name:         "remove worktree only",
+			name:         "remove worktree and branch by default",
 			worktreeName: "feature-branch",
-			branchFlag:   false,
-			expectedOutput: []string{
-				"Removed worktree",
-				"feature-branch",
-			},
-		},
-		{
-			name:         "remove worktree and branch",
-			worktreeName: "feature-branch",
-			branchFlag:   true,
+			keepFlag:     false,
 			expectedOutput: []string{
 				"Removed worktree",
 				"feature-branch",
 				"Removed branch",
+			},
+		},
+		{
+			name:         "remove worktree only with keep-branch",
+			worktreeName: "feature-branch",
+			keepFlag:     true,
+			expectedOutput: []string{
+				"Removed worktree",
+				"feature-branch",
 			},
 		},
 	}
@@ -278,15 +295,15 @@ func TestRemoveCommand_SuccessMessage(t *testing.T) {
 			}
 
 			flags := map[string]any{}
-			if tt.branchFlag {
-				flags["branch"] = true
+			if tt.keepFlag {
+				flags["keep"] = true
 			}
 
 			cmd := createRemoveTestCLICommand(flags, []string{tt.worktreeName})
 			var buf bytes.Buffer
 
-			branchFlag := tt.branchFlag
-			err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/test/repo", tt.worktreeName, false, branchFlag, false)
+			keepFlag := tt.keepFlag
+			err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/test/repo", tt.worktreeName, false, keepFlag, false)
 
 			assert.NoError(t, err)
 			output := buf.String()
@@ -616,9 +633,7 @@ func TestRemoveCommand_BranchRemovalWithUnmergedCommits(t *testing.T) {
 				results: mockResults,
 			}
 
-			flags := map[string]any{
-				"branch": true,
-			}
+			flags := map[string]any{}
 			if tt.forceBranchFlag {
 				flags["force-branch"] = true
 			}
@@ -627,7 +642,7 @@ func TestRemoveCommand_BranchRemovalWithUnmergedCommits(t *testing.T) {
 			var buf bytes.Buffer
 
 			err := removeCommandWithCommandExecutor(
-				cmd, &buf, mockExec, "/test/repo", "feature-unmerged", false, true, tt.forceBranchFlag)
+				cmd, &buf, mockExec, "/test/repo", "feature-unmerged", false, false, tt.forceBranchFlag)
 
 			if tt.shouldSucceed {
 				assert.NoError(t, err)
@@ -800,7 +815,7 @@ func createRemoveTestCLICommand(flags map[string]any, args []string) *cli.Comman
 				Name: "remove",
 				Flags: []cli.Flag{
 					&cli.BoolFlag{Name: "force"},
-					&cli.BoolFlag{Name: "branch"},
+					&cli.BoolFlag{Name: "keep"},
 					&cli.BoolFlag{Name: "force-branch"},
 				},
 				Action: func(_ context.Context, _ *cli.Command) error {

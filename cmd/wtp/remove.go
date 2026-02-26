@@ -33,11 +33,12 @@ func NewRemoveCommand() *cli.Command {
 		Aliases:   []string{"rm"},
 		Usage:     "Remove a worktree",
 		UsageText: "wtp remove <worktree-name>",
-		Description: "Removes the worktree with the specified directory name.\n\n" +
+		Description: "Removes the worktree with the specified directory name.\n" +
+			"By default, also deletes the associated branch.\n\n" +
 			"Examples:\n" +
-			"  wtp remove feature-old                  # Remove worktree\n" +
+			"  wtp remove feature-old                  # Remove worktree and branch\n" +
 			"  wtp remove -f feature-dirty             # Force remove dirty worktree\n" +
-			"  wtp remove --with-branch feature-done   # Also delete the associated branch",
+			"  wtp remove --keep-branch feature-done   # Keep the branch after removing worktree",
 		ShellComplete: completeWorktrees,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
@@ -46,12 +47,13 @@ func NewRemoveCommand() *cli.Command {
 				Aliases: []string{"f"},
 			},
 			&cli.BoolFlag{
-				Name:  "with-branch",
-				Usage: "Also remove the branch after removing worktree",
+				Name:    "keep-branch",
+				Usage:   "Keep the branch after removing worktree (default is to delete)",
+				Aliases: []string{"k"},
 			},
 			&cli.BoolFlag{
 				Name:  "force-branch",
-				Usage: "Force branch deletion even if not merged (requires --with-branch)",
+				Usage: "Force branch deletion even if not merged",
 			},
 		},
 		Action: removeCommand,
@@ -68,10 +70,10 @@ func removeCommand(_ context.Context, cmd *cli.Command) error {
 	// Extract and validate inputs
 	worktreeName := cmd.Args().Get(0)
 	force := cmd.Bool("force")
-	withBranch := cmd.Bool("with-branch")
+	keepBranch := cmd.Bool("keep-branch")
 	forceBranch := cmd.Bool("force-branch")
 
-	if err := validateRemoveInput(worktreeName, withBranch, forceBranch); err != nil {
+	if err := validateRemoveInput(worktreeName, keepBranch, forceBranch); err != nil {
 		return err
 	}
 
@@ -89,7 +91,7 @@ func removeCommand(_ context.Context, cmd *cli.Command) error {
 
 	// Use CommandExecutor-based implementation
 	executor := command.NewRealExecutor()
-	return removeCommandWithCommandExecutor(cmd, w, executor, cwd, worktreeName, force, withBranch, forceBranch)
+	return removeCommandWithCommandExecutor(cmd, w, executor, cwd, worktreeName, force, keepBranch, forceBranch)
 }
 
 func removeCommandWithCommandExecutor(
@@ -98,7 +100,7 @@ func removeCommandWithCommandExecutor(
 	executor command.Executor,
 	cwd string,
 	worktreeName string,
-	force, withBranch, forceBranch bool,
+	force, keepBranch, forceBranch bool,
 ) error {
 	// Get worktrees using CommandExecutor
 	listCmd := command.GitWorktreeList()
@@ -148,8 +150,8 @@ func removeCommandWithCommandExecutor(
 		return err
 	}
 
-	// Remove branch if requested
-	if withBranch && targetWorktree.Branch != "" {
+	// Remove branch by default unless --keep-branch is specified
+	if !keepBranch && targetWorktree.Branch != "" {
 		if err := removeBranchWithCommandExecutor(w, executor, targetWorktree.Branch, forceBranch); err != nil {
 			return err
 		}
@@ -158,12 +160,12 @@ func removeCommandWithCommandExecutor(
 	return nil
 }
 
-func validateRemoveInput(worktreeName string, withBranch, forceBranch bool) error {
+func validateRemoveInput(worktreeName string, keepBranch, forceBranch bool) error {
 	if worktreeName == "" {
 		return errors.WorktreeNameRequiredForRemove()
 	}
-	if forceBranch && !withBranch {
-		return fmt.Errorf("--force-branch requires --with-branch")
+	if forceBranch && keepBranch {
+		return fmt.Errorf("--force-branch cannot be used with --keep-branch")
 	}
 	return nil
 }

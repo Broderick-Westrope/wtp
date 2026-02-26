@@ -54,9 +54,9 @@ func WorktreeNameRequiredForRemove() error {
 Usage: wtp remove <worktree-name>
 
 Examples:
-  • wtp remove feature/auth
-  • wtp remove --with-branch feature/auth
-  • wtp remove --force feature/auth
+  • wtp remove feature/auth                    # Removes worktree and branch
+  • wtp remove --keep-branch feature/auth      # Removes worktree, keeps branch
+  • wtp remove --force feature/auth            # Force remove dirty worktree
 
 Tip: Run 'wtp list' to see available worktrees`
 	return errors.New(msg)
