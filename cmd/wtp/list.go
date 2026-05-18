@@ -41,10 +41,8 @@ const (
 
 // worktreePRCI holds PR/CI display data for a single worktree, keyed by branch name.
 type worktreePRCI struct {
-	prFmt    string
-	ciFmt    string
-	prNumber int
-	isMerged bool
+	prFmt string
+	ciFmt string
 }
 
 // Variables to allow mocking in tests
@@ -253,10 +251,8 @@ func prciFromCache(cached *cache.WorktreeCache) worktreePRCI {
 		})
 	}
 	return worktreePRCI{
-		prFmt:    prFmt,
-		ciFmt:    cached.CIStatus,
-		prNumber: cached.PRNumber,
-		isMerged: cached.PRState == prStateMerged,
+		prFmt: prFmt,
+		ciFmt: cached.CIStatus,
 	}
 }
 
