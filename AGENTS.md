@@ -3,7 +3,7 @@
 `wtp` is a Go CLI that simplifies `git worktree` workflows for creating, listing, moving, and removing worktrees.
 
 ## Essentials
-- Toolchain: Go 1.24
+- Toolchain: Go 1.26
 - Package manager: Go modules (`go`)
 - Project task runner: `go tool task`
 - Non-standard project commands:
