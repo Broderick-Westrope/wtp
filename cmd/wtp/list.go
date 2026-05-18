@@ -303,27 +303,26 @@ func fetchPRCIData(
 		prFmt := github.FormatPRState(pr)
 		ciFmt := github.FormatCIStatus(ci)
 
-		entry := cache.WorktreeCache{CIStatus: ciFmt}
-		prNum := 0
-		isMerged := false
-		if pr != nil {
-			entry.PRNumber = pr.Number
-			entry.PRState = pr.State
-			entry.PRTitle = pr.Title
-			prNum = pr.Number
-			isMerged = pr.State == prStateMerged
+		// Only cache successful fetches — partial failures would poison the
+		// cache with PRNumber=0/PRState="" and suppress fresh attempts until
+		// the TTL expires.
+		if prErr == nil && ciErr == nil {
+			entry := cache.WorktreeCache{CIStatus: ciFmt}
+			if pr != nil {
+				entry.PRNumber = pr.Number
+				entry.PRState = pr.State
+				entry.PRTitle = pr.Title
+			}
+			newEntries[key] = entry
 		}
-		newEntries[key] = entry
 
 		prciData[wt.Branch] = worktreePRCI{
-			prFmt:    prFmt,
-			ciFmt:    ciFmt,
-			prNumber: prNum,
-			isMerged: isMerged,
+			prFmt: prFmt,
+			ciFmt: ciFmt,
 		}
 
-		if isMerged && !archivedBranches[wt.Branch] {
-			autoArchiveBranch(w, wt.Branch, prNum, repoID, stateStore, archivedBranches)
+		if pr != nil && pr.State == prStateMerged && !archivedBranches[wt.Branch] {
+			autoArchiveBranch(w, wt.Branch, pr.Number, repoID, stateStore, archivedBranches)
 		}
 	}
 
