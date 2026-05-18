@@ -200,7 +200,9 @@ func checkOrphanedCentralizedDirs(w io.Writer, registeredPaths map[string]bool) 
 	return count
 }
 
-const maxCentralizedDirDepth = 3
+// maxCentralizedDirDepth is the depth limit for walking centralized storage.
+// Paths can be up to 5 levels: host/owner/repo/feature/branch-name
+const maxCentralizedDirDepth = 5
 
 func walkCentralizedDirs(
 	dir string,
