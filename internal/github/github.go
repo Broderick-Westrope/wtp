@@ -90,8 +90,8 @@ func GetPRForBranch(ctx context.Context, branch string) (*PRInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view", "--", branch,
-		"--json", "number,state,title,headRefName,isDraft")
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view",
+		"--json", "number,state,title,headRefName,isDraft", "--", branch)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -136,8 +136,8 @@ func GetCIStatus(ctx context.Context, branch string) (*CIStatus, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "pr", "checks", "--", branch,
-		"--json", "name,state")
+	cmd := exec.CommandContext(ctx, "gh", "pr", "checks",
+		"--json", "name,state", "--", branch)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
