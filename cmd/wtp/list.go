@@ -8,8 +8,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/urfave/cli/v3"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 
 	"github.com/satococoa/wtp/v3/internal/cache"
@@ -255,8 +259,79 @@ func prciFromCache(cached *cache.WorktreeCache) worktreePRCI {
 	}
 }
 
+// prciSharedState holds the shared mutable state passed to per-branch fetch goroutines.
+type prciSharedState struct {
+	mu               sync.Mutex
+	errorCount       atomic.Int32
+	newEntries       map[string]cache.WorktreeCache
+	archivedBranches map[string]bool
+	prciData         map[string]worktreePRCI
+}
+
+// fetchPRCIForBranch fetches PR/CI data for a single branch and updates shared state.
+// Network calls are made outside the lock; map writes are protected by mu.
+func fetchPRCIForBranch(
+	ctx context.Context,
+	wt git.Worktree,
+	key string,
+	repoID *remote.RepoIdentifier,
+	stateStore *state.Store,
+	cacheStore *cache.Store,
+	ttl time.Duration,
+	shared *prciSharedState,
+) error {
+	// Use cached data if fresh
+	if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
+		shared.mu.Lock()
+		shared.prciData[wt.Branch] = prciFromCache(&cached)
+		if cached.PRState == prStateMerged && !shared.archivedBranches[wt.Branch] {
+			autoArchiveBranch(wt.Branch, cached.PRNumber, repoID, stateStore, shared.archivedBranches)
+		}
+		shared.mu.Unlock()
+		return nil
+	}
+
+	// Fetch fresh data concurrently — network calls outside the lock
+	pr, prErr := listGetPRForBranch(ctx, wt.Branch)
+	ci, ciErr := listGetCIStatus(ctx, wt.Branch)
+	if prErr != nil || ciErr != nil {
+		shared.errorCount.Add(1) // count branches (not individual calls) that had fetch errors
+	}
+
+	prFmt := github.FormatPRState(pr)
+	ciFmt := github.FormatCIStatus(ci)
+
+	shared.mu.Lock()
+	defer shared.mu.Unlock()
+
+	// Only cache successful fetches — partial failures would poison the
+	// cache with PRNumber=0/PRState="" and suppress fresh attempts until
+	// the TTL expires.
+	if prErr == nil && ciErr == nil {
+		entry := cache.WorktreeCache{CIStatus: ciFmt}
+		if pr != nil {
+			entry.PRNumber = pr.Number
+			entry.PRState = pr.State
+			entry.PRTitle = pr.Title
+		}
+		shared.newEntries[key] = entry
+	}
+
+	shared.prciData[wt.Branch] = worktreePRCI{
+		prFmt: prFmt,
+		ciFmt: ciFmt,
+	}
+
+	if pr != nil && pr.State == prStateMerged && !shared.archivedBranches[wt.Branch] {
+		autoArchiveBranch(wt.Branch, pr.Number, repoID, stateStore, shared.archivedBranches)
+	}
+
+	return nil
+}
+
 // fetchPRCIData fetches PR/CI info for non-main non-detached worktrees, updating prciData and
 // archivedBranches in-place. Auto-archive notices are printed to stderr.
+// Fetches across branches are parallelized using errgroup.
 func fetchPRCIData(
 	ctx context.Context,
 	worktrees []git.Worktree,
@@ -269,62 +344,34 @@ func fetchPRCIData(
 	globalCfg, _ := config.LoadGlobalConfig()
 	ttl := globalCfg.CacheTTL
 
-	newEntries := make(map[string]cache.WorktreeCache)
-	errorCount := 0
+	shared := &prciSharedState{
+		newEntries:       make(map[string]cache.WorktreeCache),
+		archivedBranches: archivedBranches,
+		prciData:         prciData,
+	}
+
+	g, gCtx := errgroup.WithContext(ctx)
 
 	for _, wt := range worktrees {
 		if wt.Branch == "" || wt.Branch == detachedKeyword || wt.IsMain {
 			continue
 		}
+
 		key := repoID.StateKey(wt.Branch)
-
-		// Use cached data if fresh
-		if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
-			prciData[wt.Branch] = prciFromCache(&cached)
-			if cached.PRState == prStateMerged && !archivedBranches[wt.Branch] {
-				autoArchiveBranch(wt.Branch, cached.PRNumber, repoID, stateStore, archivedBranches)
-			}
-			continue
-		}
-
-		// Fetch fresh data
-		pr, prErr := listGetPRForBranch(ctx, wt.Branch)
-		ci, ciErr := listGetCIStatus(ctx, wt.Branch)
-		if prErr != nil || ciErr != nil {
-			errorCount++ // count branches (not individual calls) that had fetch errors
-		}
-
-		prFmt := github.FormatPRState(pr)
-		ciFmt := github.FormatCIStatus(ci)
-
-		// Only cache successful fetches — partial failures would poison the
-		// cache with PRNumber=0/PRState="" and suppress fresh attempts until
-		// the TTL expires.
-		if prErr == nil && ciErr == nil {
-			entry := cache.WorktreeCache{CIStatus: ciFmt}
-			if pr != nil {
-				entry.PRNumber = pr.Number
-				entry.PRState = pr.State
-				entry.PRTitle = pr.Title
-			}
-			newEntries[key] = entry
-		}
-
-		prciData[wt.Branch] = worktreePRCI{
-			prFmt: prFmt,
-			ciFmt: ciFmt,
-		}
-
-		if pr != nil && pr.State == prStateMerged && !archivedBranches[wt.Branch] {
-			autoArchiveBranch(wt.Branch, pr.Number, repoID, stateStore, archivedBranches)
-		}
+		g.Go(func() error {
+			return fetchPRCIForBranch(gCtx, wt, key, repoID, stateStore, cacheStore, ttl, shared)
+		})
 	}
 
-	if errorCount > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: failed to fetch PR/CI status for %d branch(es)\n", errorCount)
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
-	_ = cacheStore.SetBatch(newEntries)
+	if count := shared.errorCount.Load(); count > 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: failed to fetch PR/CI status for %d branch(es)\n", count)
+	}
+
+	_ = cacheStore.SetBatch(shared.newEntries)
 	return nil
 }
 
