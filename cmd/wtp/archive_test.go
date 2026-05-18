@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -30,7 +31,9 @@ func testWorktrees() []git.Worktree {
 func setupStateStore(t *testing.T) *state.Store {
 	t.Helper()
 	dataDir := t.TempDir()
+	t.Cleanup(axdg.Reload)
 	t.Setenv("XDG_DATA_HOME", dataDir)
+	axdg.Reload()
 	// Ensure the wtp subdirectory exists
 	wtpDir := filepath.Join(dataDir, "wtp")
 	require.NoError(t, os.MkdirAll(wtpDir, 0o755))

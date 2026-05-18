@@ -5,71 +5,17 @@ import (
 	"path/filepath"
 	"testing"
 
+	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
-func TestDataHome_EnvOverride(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "/custom/data")
-
-	got := xdg.DataHome()
-
-	assert.Equal(t, "/custom/data", got)
-}
-
-func TestDataHome_Default(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", "")
-
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	got := xdg.DataHome()
-
-	assert.Equal(t, filepath.Join(home, ".local", "share"), got)
-}
-
-func TestConfigHome_EnvOverride(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
-
-	got := xdg.ConfigHome()
-
-	assert.Equal(t, "/custom/config", got)
-}
-
-func TestConfigHome_Default(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "")
-
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	got := xdg.ConfigHome()
-
-	assert.Equal(t, filepath.Join(home, ".config"), got)
-}
-
-func TestCacheHome_EnvOverride(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", "/custom/cache")
-
-	got := xdg.CacheHome()
-
-	assert.Equal(t, "/custom/cache", got)
-}
-
-func TestCacheHome_Default(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", "")
-
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
-	got := xdg.CacheHome()
-
-	assert.Equal(t, filepath.Join(home, ".cache"), got)
-}
-
 func TestWtpDataDir(t *testing.T) {
+	t.Cleanup(axdg.Reload)
 	t.Setenv("XDG_DATA_HOME", "/custom/data")
+	axdg.Reload()
 
 	got := xdg.WtpDataDir()
 
@@ -77,7 +23,9 @@ func TestWtpDataDir(t *testing.T) {
 }
 
 func TestWtpConfigDir(t *testing.T) {
+	t.Cleanup(axdg.Reload)
 	t.Setenv("XDG_CONFIG_HOME", "/custom/config")
+	axdg.Reload()
 
 	got := xdg.WtpConfigDir()
 
@@ -85,7 +33,9 @@ func TestWtpConfigDir(t *testing.T) {
 }
 
 func TestWtpCacheDir(t *testing.T) {
+	t.Cleanup(axdg.Reload)
 	t.Setenv("XDG_CACHE_HOME", "/custom/cache")
+	axdg.Reload()
 
 	got := xdg.WtpCacheDir()
 
@@ -93,11 +43,43 @@ func TestWtpCacheDir(t *testing.T) {
 }
 
 func TestWorktreeStorageRoot(t *testing.T) {
+	t.Cleanup(axdg.Reload)
 	t.Setenv("XDG_DATA_HOME", "/custom/data")
+	axdg.Reload()
 
 	got := xdg.WorktreeStorageRoot()
 
 	assert.Equal(t, "/custom/data/wtp/worktrees", got)
+}
+
+func TestWtpDataDir_Default(t *testing.T) {
+	t.Cleanup(axdg.Reload)
+	t.Setenv("XDG_DATA_HOME", "")
+	axdg.Reload()
+
+	got := xdg.WtpDataDir()
+
+	assert.Equal(t, filepath.Join(axdg.DataHome, "wtp"), got)
+}
+
+func TestWtpConfigDir_Default(t *testing.T) {
+	t.Cleanup(axdg.Reload)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	axdg.Reload()
+
+	got := xdg.WtpConfigDir()
+
+	assert.Equal(t, filepath.Join(axdg.ConfigHome, "wtp"), got)
+}
+
+func TestWtpCacheDir_Default(t *testing.T) {
+	t.Cleanup(axdg.Reload)
+	t.Setenv("XDG_CACHE_HOME", "")
+	axdg.Reload()
+
+	got := xdg.WtpCacheDir()
+
+	assert.Equal(t, filepath.Join(axdg.CacheHome, "wtp"), got)
 }
 
 func TestEnsureDir_CreatesNestedDirectories(t *testing.T) {

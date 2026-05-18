@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"testing"
 
+	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -335,6 +336,7 @@ func TestResolveWorktreePath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dataHome := t.TempDir()
 			t.Setenv("XDG_DATA_HOME", dataHome)
+			axdg.Reload()
 
 			var getURL func(string) (string, error)
 			if tt.originURL == "" {
@@ -399,6 +401,7 @@ func TestAddCommand_CommandConstruction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dataHome := t.TempDir()
 			t.Setenv("XDG_DATA_HOME", dataHome)
+			axdg.Reload()
 
 			cmd := createTestCLICommand(tt.flags, tt.args)
 			var buf bytes.Buffer
@@ -443,6 +446,7 @@ func TestAddCommand_SuccessMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dataHome := t.TempDir()
 			t.Setenv("XDG_DATA_HOME", dataHome)
+			axdg.Reload()
 
 			cmd := createTestCLICommand(map[string]any{"branch": tt.branchName}, []string{tt.branchName})
 			var buf bytes.Buffer
@@ -488,6 +492,7 @@ func TestAddCommand_ValidationErrors(t *testing.T) {
 func TestAddCommand_NoOriginRemote(t *testing.T) {
 	dataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
 
 	cmd := createTestCLICommand(map[string]any{"branch": "feature/auth"}, []string{"feature/auth"})
 	var buf bytes.Buffer
@@ -503,6 +508,7 @@ func TestAddCommand_NoOriginRemote(t *testing.T) {
 func TestAddCommand_UnparseableURL(t *testing.T) {
 	dataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
 
 	cmd := createTestCLICommand(map[string]any{"branch": "feature/auth"}, []string{"feature/auth"})
 	var buf bytes.Buffer
@@ -520,6 +526,7 @@ func TestAddCommand_UnparseableURL(t *testing.T) {
 func TestAddCommand_ExecutionError(t *testing.T) {
 	dataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
 
 	mockExec := &mockCommandExecutor{shouldFail: true}
 	var buf bytes.Buffer
@@ -535,6 +542,7 @@ func TestAddCommand_ExecutionError(t *testing.T) {
 func TestAddCommand_ExecFailureKeepsCreationContext(t *testing.T) {
 	dataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
 
 	cmd := createTestCLICommand(map[string]any{
 		"branch": "feature/auth",
@@ -581,6 +589,7 @@ func TestAddCommand_InternationalCharacters(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dataHome := t.TempDir()
 			t.Setenv("XDG_DATA_HOME", dataHome)
+			axdg.Reload()
 
 			mockExec := &mockCommandExecutor{}
 			var buf bytes.Buffer
@@ -657,6 +666,7 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 	t.Run("should support wtp add -b <new-branch>", func(t *testing.T) {
 		dataHome := t.TempDir()
 		t.Setenv("XDG_DATA_HOME", dataHome)
+		axdg.Reload()
 
 		mockExec := &mockCommandExecutor{}
 		var buf bytes.Buffer
@@ -676,6 +686,7 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 	t.Run("should support wtp add -b <new-branch> <commit>", func(t *testing.T) {
 		dataHome := t.TempDir()
 		t.Setenv("XDG_DATA_HOME", dataHome)
+		axdg.Reload()
 
 		mockExec := &mockCommandExecutor{}
 		var buf bytes.Buffer
@@ -898,6 +909,7 @@ func TestAddCommand_HookPathResolution(t *testing.T) {
 	// Source resolves from main repo (repoRoot); destination is under XDG.
 	dataHome := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
 
 	// The worktree will be created at $XDG_DATA_HOME/wtp/worktrees/owner/repo/feature/test
 	expectedWorktreePath := filepath.Join(xdg.WorktreeStorageRoot(), "owner", "repo", "feature", "test")

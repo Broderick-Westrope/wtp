@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -16,7 +17,9 @@ func newTestStore(t *testing.T) *cache.Store {
 	t.Helper()
 
 	dir := t.TempDir()
+	t.Cleanup(axdg.Reload)
 	t.Setenv("XDG_CACHE_HOME", dir)
+	axdg.Reload()
 
 	return cache.NewStore()
 }

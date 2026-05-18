@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v3"
 
@@ -1244,6 +1245,7 @@ branch refs/heads/feature/auth
 func TestListCommand_AllShowsArchived(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+	axdg.Reload()
 
 	oldIsGH := listIsGHAvailable
 	listIsGHAvailable = func() bool { return false }
@@ -1371,7 +1373,9 @@ func TestListCommand_AutoArchiveMergedPR(t *testing.T) {
 	dataDir := t.TempDir()
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	axdg.Reload()
 
 	oldIsGH := listIsGHAvailable
 	listIsGHAvailable = func() bool { return true }
@@ -1542,7 +1546,9 @@ func TestListCommand_WithGHColumns(t *testing.T) {
 	dataDir := t.TempDir()
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	axdg.Reload()
 
 	oldIsGH := listIsGHAvailable
 	listIsGHAvailable = func() bool { return true }

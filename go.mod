@@ -3,6 +3,7 @@ module github.com/satococoa/wtp/v3
 go 1.24.4
 
 require (
+	github.com/adrg/xdg v0.5.3
 	github.com/gofrs/flock v0.13.0
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.3.8

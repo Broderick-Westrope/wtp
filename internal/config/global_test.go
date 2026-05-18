@@ -5,13 +5,17 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	axdg "github.com/adrg/xdg"
 )
 
 // setXDGConfigHome overrides XDG_CONFIG_HOME for the duration of the test and
 // automatically restores the original value via t.Cleanup.
 func setXDGConfigHome(t *testing.T, dir string) {
 	t.Helper()
+	t.Cleanup(axdg.Reload)
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	axdg.Reload()
 }
 
 // TestGlobalLoadDefaults verifies that LoadGlobalConfig returns DefaultCacheTTL

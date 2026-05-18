@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,6 +30,7 @@ func TestNewDoctorCommand(t *testing.T) {
 func TestDoctor_CheckV2Worktrees_Clean(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+	axdg.Reload()
 
 	worktrees := []git.Worktree{
 		// Path under centralized wtp storage — should NOT be flagged as v2
@@ -61,6 +63,7 @@ func TestDoctor_CheckV2Worktrees_DetectsV2(t *testing.T) {
 func TestDoctor_CheckOrphanedStateEntries_Clean(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+	axdg.Reload()
 
 	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
 
@@ -74,7 +77,9 @@ func TestDoctor_CheckOrphanedStateEntries_DetectsOrphaned(t *testing.T) {
 	dataDir := t.TempDir()
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	axdg.Reload()
 
 	wtpDir := filepath.Join(dataDir, "wtp")
 	require.NoError(t, os.MkdirAll(wtpDir, 0o755))
@@ -143,6 +148,7 @@ func TestDoctor_CheckGHStatus_NotAvailable(t *testing.T) {
 func TestDoctor_CheckOrphanedCentralizedDirs_Empty(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+	axdg.Reload()
 
 	var buf bytes.Buffer
 	count := checkOrphanedCentralizedDirs(&buf, map[string]bool{})
@@ -154,6 +160,7 @@ func TestDoctor_CheckOrphanedCentralizedDirs_Empty(t *testing.T) {
 func TestDoctor_CheckOrphanedCentralizedDirs_DetectsOrphaned(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+	axdg.Reload()
 
 	// Create a fake worktree directory in centralized storage with a .git file
 	wtDir := filepath.Join(dataDir, "wtp", "worktrees", "owner", "repo", "feature-orphaned")
@@ -176,6 +183,7 @@ func TestDoctor_CheckOrphanedCentralizedDirs_DetectsOrphaned(t *testing.T) {
 func TestIsV2WorktreePath(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
+	axdg.Reload()
 
 	tests := []struct {
 		absPath  string
