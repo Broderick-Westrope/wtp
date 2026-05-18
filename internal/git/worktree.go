@@ -4,7 +4,6 @@ package git
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 )
 
 const (
@@ -22,8 +21,12 @@ type Worktree struct {
 	IsMain bool // True if this is the main/root worktree
 }
 
-// Name returns the directory name of the worktree path.
+// Name returns the branch name of the worktree.
+// Falls back to the directory name when Branch is empty (e.g. detached HEAD).
 func (w *Worktree) Name() string {
+	if w.Branch != "" {
+		return w.Branch
+	}
 	return filepath.Base(w.Path)
 }
 
@@ -36,46 +39,13 @@ func (w *Worktree) String() string {
 
 // CompletionName returns the name to display for shell completion.
 //
-// Format: <worktreeName>@<commit-ish>[(root worktree)]
-//
-// Examples:
-//   - Root worktree: "giselle@fix-nodes(root worktree)"
-//   - Matching names: "develop" (when worktree dir and branch both = "develop")
-//   - Different names: "feature-awesome@feature/awesome"
-//   - Full path match: "feature/new-top-page" (when path ends with branch name)
-func (w *Worktree) CompletionName(repoName string) string {
-	// Check if this is the main/root worktree
+// The repoName parameter is accepted for API compatibility but is no longer used.
+// Returns "@" for the main worktree and the branch name for all others.
+func (w *Worktree) CompletionName(_ string) string {
 	if w.IsMain {
-		return fmt.Sprintf("%s@%s(root worktree)", repoName, w.Branch)
+		return "@"
 	}
-
-	// For other worktrees, determine optimal display format
-	return w.formatNonRootWorktreeCompletion()
-}
-
-// formatNonRootWorktreeCompletion formats completion name for non-root worktrees.
-// Priority:
-// 1. If path ends with branch name → show branch only
-// 2. If directory name = branch name → show branch only
-// 3. Otherwise → show "directory@branch"
-func (w *Worktree) formatNonRootWorktreeCompletion() string {
-	if w.Branch == "" {
-		return filepath.Base(w.Path)
-	}
-
-	// Check if path ends with full branch name (handles prefixed paths)
-	if strings.HasSuffix(w.Path, w.Branch) {
-		return w.Branch
-	}
-
-	// Check if directory name matches branch name
-	worktreeName := filepath.Base(w.Path)
-	if w.Branch == worktreeName {
-		return w.Branch
-	}
-
-	// Different names: show both
-	return fmt.Sprintf("%s@%s", worktreeName, w.Branch)
+	return w.Branch
 }
 
 // IsMainWorktree returns true if this is the main/root worktree

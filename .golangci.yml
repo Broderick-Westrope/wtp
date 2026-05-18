@@ -45,13 +45,34 @@ linters:
           list-mode: lax
           allow:
             - $gostd
-            - github.com/satococoa/wtp/v2
+            - github.com/satococoa/wtp/v3
             - github.com/urfave/cli/v3
             - go.yaml.in/yaml/v3
     govet:
       enable-all: true
       disable:
         - fieldalignment
+    goconst:
+      min-len: 3
+      min-occurrences: 5
+      ignore-string-values:
+        - add
+        - remove
+        - list
+        - exec
+        - init
+        - cd
+        - bash
+        - zsh
+        - fish
+        - wtp
+        - branch
+        - force
+        - version
+        - keep-branch
+        - worktree
+        - git
+        - config
     gocyclo:
       min-complexity: 15
     misspell:
@@ -85,9 +106,20 @@ linters:
           - mnd
           - goconst
           - gosec
+      - path: test/e2e/
+        linters:
+          - gosec
       - linters:
           - lll
         source: "^//go:generate "
+      # G204: Subprocess launched with variable — expected for a CLI wrapping git/gh
+      - linters:
+          - gosec
+        text: "G204:"
+      # G703: Path traversal via taint analysis — expected for a tool managing filesystem paths
+      - linters:
+          - gosec
+        text: "G703:"
 
 formatters:
   enable:
@@ -99,7 +131,7 @@ formatters:
       # The default keeps CI and ad-hoc runs deterministic if the task runner
       # is bypassed.
       local-prefixes:
-        - ${GOIMPORTS_LOCAL_PREFIXES:-github.com/satococoa/wtp/v2}
+        - ${GOIMPORTS_LOCAL_PREFIXES:-github.com/satococoa/wtp/v3}
 
 issues:
   max-issues-per-linter: 0

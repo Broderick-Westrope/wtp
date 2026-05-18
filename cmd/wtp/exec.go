@@ -9,9 +9,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v2/internal/command"
-	"github.com/satococoa/wtp/v2/internal/errors"
-	"github.com/satococoa/wtp/v2/internal/git"
+	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/satococoa/wtp/v3/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/git"
 )
 
 // NewExecCommand creates the exec command definition.
@@ -71,10 +71,9 @@ func execCommandWithCommandExecutor(cmd *cli.Command, w io.Writer, executor comm
 	}
 
 	worktrees := parseWorktreesFromOutput(gitResult.Output)
-	mainWorktreePath := findMainWorktreePath(worktrees)
-	targetPath := resolveWorktreePathByName(worktreeName, worktrees, mainWorktreePath)
-	if targetPath == "" {
-		return errors.WorktreeNotFound(worktreeName, availableManagedWorktreeNames(worktrees, mainWorktreePath))
+	targetPath, err := resolveWorktreePathByName(worktreeName, worktrees)
+	if err != nil {
+		return err
 	}
 
 	execResult, err := executor.Execute([]command.Command{{

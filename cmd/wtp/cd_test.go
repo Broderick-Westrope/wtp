@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -9,14 +10,47 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/satococoa/wtp/v3/internal/fzf"
 )
 
-// ===== Critical User Scenarios =====
+// --- test doubles ---
 
-// This is the most important test - the core value proposition
-func TestCdCommand_AlwaysOutputsAbsolutePath(t *testing.T) {
-	// Setup a realistic worktree scenario
-	worktreeList := `worktree /Users/dev/project/main
+// stubExecutor returns a fixed ExecutionResult.
+type stubExecutor struct {
+	output string
+}
+
+func (s *stubExecutor) Execute(_ []command.Command) (*command.ExecutionResult, error) {
+	return &command.ExecutionResult{
+		Results: []command.Result{{Output: s.output}},
+	}, nil
+}
+
+// stubFinder is a mock fzf.Finder for testing.
+type stubFinder struct {
+	available bool
+	result    string
+	err       error
+	findCalls []stubFindCall
+}
+
+type stubFindCall struct {
+	items []string
+	query string
+}
+
+func (m *stubFinder) Available() bool { return m.available }
+
+func (m *stubFinder) Find(items []string, query string) (string, error) {
+	m.findCalls = append(m.findCalls, stubFindCall{items: items, query: query})
+	return m.result, m.err
+}
+
+// --- worktree list fixtures ---
+
+const realisticWorktreeList = `worktree /Users/dev/project/main
 HEAD abc123
 branch refs/heads/main
 
@@ -26,6 +60,10 @@ branch refs/heads/feature/auth
 
 `
 
+// ===== Critical User Scenarios =====
+
+// This is the most important test - the core value proposition
+func TestCdCommand_AlwaysOutputsAbsolutePath(t *testing.T) {
 	tests := []struct {
 		name          string
 		worktreeName  string
@@ -45,10 +83,9 @@ branch refs/heads/feature/auth
 			shouldSucceed: true,
 		},
 		{
-			name:          "feature worktree by directory name",
+			name:          "directory name alone does not match (branch-name resolution only)",
 			worktreeName:  "auth",
-			expectedPath:  "/Users/dev/project/worktrees/feature/auth",
-			shouldSucceed: true, // Directory-based resolution works as expected
+			shouldSucceed: false, // "auth" is not a branch name; branch is "feature/auth"
 		},
 		{
 			name:          "nonexistent worktree",
@@ -59,19 +96,19 @@ branch refs/heads/feature/auth
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			worktrees := parseWorktreesFromOutput(worktreeList)
-			mainPath := findMainWorktreePath(worktrees)
+			worktrees := parseWorktreesFromOutput(realisticWorktreeList)
 
-			resolvedPath := resolveWorktreePathByName(tt.worktreeName, worktrees, mainPath)
+			resolvedPath, err := resolveWorktreePathByName(tt.worktreeName, worktrees)
 
 			if tt.shouldSucceed {
+				require.NoError(t, err)
 				assert.Equal(t, tt.expectedPath, resolvedPath,
 					"cd command must output correct absolute path")
 				assert.True(t, filepath.IsAbs(resolvedPath),
 					"cd command must always output absolute paths")
 			} else {
-				assert.Empty(t, resolvedPath,
-					"cd command should return empty string for nonexistent worktrees")
+				assert.Error(t, err,
+					"cd command should return error for nonexistent worktrees")
 			}
 		})
 	}
@@ -79,9 +116,6 @@ branch refs/heads/feature/auth
 
 // Test the architectural guarantee: no environment variable dependency
 func TestCdCommand_NoEnvironmentVariableDependency(t *testing.T) {
-	// This test ensures we maintain the "pure function" architecture
-
-	// Make sure no environment variables affect the core function
 	originalEnv := os.Getenv("WTP_SHELL_INTEGRATION")
 	t.Cleanup(func() {
 		if originalEnv != "" {
@@ -91,7 +125,6 @@ func TestCdCommand_NoEnvironmentVariableDependency(t *testing.T) {
 		}
 	})
 
-	// Test with various environment states
 	envStates := []struct {
 		name  string
 		value string
@@ -110,12 +143,11 @@ func TestCdCommand_NoEnvironmentVariableDependency(t *testing.T) {
 				require.NoError(t, os.Setenv("WTP_SHELL_INTEGRATION", env.value))
 			}
 
-			// The core resolution function should work regardless of environment
 			worktreeList := "worktree /test/main\nHEAD abc\nbranch refs/heads/main\n\n"
 			worktrees := parseWorktreesFromOutput(worktreeList)
-			mainPath := findMainWorktreePath(worktrees)
 
-			resolvedPath := resolveWorktreePathByName("@", worktrees, mainPath)
+			resolvedPath, err := resolveWorktreePathByName("@", worktrees)
+			require.NoError(t, err)
 			assert.Equal(t, "/test/main", resolvedPath,
 				"Path resolution must not depend on environment variables")
 		})
@@ -157,14 +189,14 @@ func TestCdCommand_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			worktrees := parseWorktreesFromOutput(tt.worktreeList)
-			mainPath := findMainWorktreePath(worktrees)
 
-			result := resolveWorktreePathByName(tt.worktreeName, worktrees, mainPath)
+			result, err := resolveWorktreePathByName(tt.worktreeName, worktrees)
 
 			if tt.shouldFind {
+				require.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
 			} else {
-				assert.Empty(t, result)
+				assert.Error(t, err)
 			}
 		})
 	}
@@ -176,13 +208,6 @@ func TestCdCommand_CoreBehavior(t *testing.T) {
 	assert.Equal(t, "cd", cmd.Name)
 	assert.Equal(t, "Output absolute path to worktree", cmd.Usage)
 	assert.NotNil(t, cmd.ShellComplete)
-	// The rest is implementation detail - what matters is that it works
-}
-
-// ===== Worktree Completion Tests =====
-
-func TestGetWorktreeNameFromPathCd(t *testing.T) {
-	RunNameFromPathTests(t, "cd", getWorktreeNameFromPathCd)
 }
 
 func TestGetWorktreesForCd(t *testing.T) {
@@ -200,5 +225,126 @@ func TestCompleteWorktreesForCd(t *testing.T) {
 
 			completeWorktreesForCd(context.Background(), cmd)
 		})
+	})
+}
+
+// ===== fzf integration =====
+
+func TestCdCommand_FzfInteractivePicker(t *testing.T) {
+	t.Run("no args with fzf available launches picker", func(t *testing.T) {
+		finder := &stubFinder{available: true, result: "feature/auth"}
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "", finder)
+
+		require.NoError(t, err)
+		assert.Equal(t, "/Users/dev/project/worktrees/feature/auth\n", buf.String())
+		require.Len(t, finder.findCalls, 1)
+		assert.Empty(t, finder.findCalls[0].query, "picker should have no initial query")
+		assert.ElementsMatch(t, []string{"@", "feature/auth"}, finder.findCalls[0].items)
+	})
+
+	t.Run("no args with fzf selects main via @", func(t *testing.T) {
+		finder := &stubFinder{available: true, result: "@"}
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "", finder)
+
+		require.NoError(t, err)
+		assert.Equal(t, "/Users/dev/project/main\n", buf.String())
+	})
+
+	t.Run("no args with fzf canceled produces no output", func(t *testing.T) {
+		finder := &stubFinder{available: true, err: fzf.ErrCanceled}
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "", finder)
+
+		require.NoError(t, err)
+		assert.Empty(t, buf.String(), "canceled fzf should produce no output")
+	})
+
+	t.Run("no args without fzf falls back to main worktree", func(t *testing.T) {
+		finder := &stubFinder{available: false}
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "", finder)
+
+		require.NoError(t, err)
+		assert.Equal(t, "/Users/dev/project/main\n", buf.String())
+		assert.Empty(t, finder.findCalls, "should not call fzf when unavailable")
+	})
+
+	t.Run("no args with nil finder falls back to main worktree", func(t *testing.T) {
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "", nil)
+
+		require.NoError(t, err)
+		assert.Equal(t, "/Users/dev/project/main\n", buf.String())
+	})
+}
+
+func TestCdCommand_FzfFuzzyFallback(t *testing.T) {
+	t.Run("exact match bypasses fzf", func(t *testing.T) {
+		finder := &stubFinder{available: true}
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "feature/auth", finder)
+
+		require.NoError(t, err)
+		assert.Equal(t, "/Users/dev/project/worktrees/feature/auth\n", buf.String())
+		assert.Empty(t, finder.findCalls, "fzf should not be called for exact matches")
+	})
+
+	t.Run("no exact match falls back to fzf with query", func(t *testing.T) {
+		finder := &stubFinder{available: true, result: "feature/auth"}
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "auth", finder)
+
+		require.NoError(t, err)
+		assert.Equal(t, "/Users/dev/project/worktrees/feature/auth\n", buf.String())
+		require.Len(t, finder.findCalls, 1)
+		assert.Equal(t, "auth", finder.findCalls[0].query, "fzf should receive the original query")
+	})
+
+	t.Run("no exact match and fzf canceled produces no output", func(t *testing.T) {
+		finder := &stubFinder{available: true, err: fzf.ErrCanceled}
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "nonexistent", finder)
+
+		require.NoError(t, err)
+		assert.Empty(t, buf.String())
+	})
+
+	t.Run("no exact match without fzf returns error", func(t *testing.T) {
+		finder := &stubFinder{available: false}
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "nonexistent", finder)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "nonexistent")
+	})
+
+	t.Run("no exact match with nil finder returns error", func(t *testing.T) {
+		exec := &stubExecutor{output: realisticWorktreeList}
+
+		var buf bytes.Buffer
+		err := cdCommandWithCommandExecutor(&buf, exec, "nonexistent", nil)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "nonexistent")
 	})
 }

@@ -1,109 +1,74 @@
 package e2e
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
-	"github.com/satococoa/wtp/v2/test/e2e/framework"
+	"github.com/satococoa/wtp/v3/test/e2e/framework"
 )
 
-// TestConfigBaseDirIntegration tests that base_dir configuration is properly handled
-func TestConfigBaseDirIntegration(t *testing.T) {
+// TestHooksOnlyConfig verifies that the v3 config (hooks-only, no version/base_dir)
+// works correctly and that legacy fields are silently ignored.
+func TestHooksOnlyConfig(t *testing.T) {
 	env := framework.NewTestEnvironment(t)
 	defer env.Cleanup()
 
-	t.Run("AddUsesConfigBaseDir", func(t *testing.T) {
-		repo := env.CreateTestRepo("config-base-dir")
+	t.Run("HooksConfigWorks", func(t *testing.T) {
+		repo := env.CreateTestRepo("hooks-config")
 
-		// Create config with custom base_dir
-		config := `version: 1.0
-defaults:
-  base_dir: "../my-custom-worktrees"
+		config := `hooks:
+  post_create:
+    - type: command
+      command: touch integration-hook.txt
 `
 		repo.WriteConfig(config)
+		repo.CreateBranch("feature/integration")
 
-		// Verify config file exists
-		framework.AssertFileExists(t, repo, ".wtp.yml")
-
-		repo.CreateBranch("feature/test")
-
-		// Add worktree
-		output, err := repo.RunWTP("add", "feature/test")
+		output, err := repo.RunWTP("add", "feature/integration")
 		framework.AssertNoError(t, err)
-		framework.AssertWorktreeCreated(t, output, "feature/test")
+		framework.AssertWorktreeCreated(t, output, "feature/integration")
+		framework.AssertOutputContains(t, output, "All hooks executed successfully")
 
-		// Verify worktree was created in custom directory
-		worktrees := repo.ListWorktrees()
-
-		// Using testify's assert for more complex checks
-		assert.NotEmpty(t, worktrees, "Should have at least one worktree")
-
-		// Find the feature/test worktree path
-		var featureWorktreePath string
-		for _, wt := range worktrees {
-			if strings.Contains(wt, "feature/test") && wt != repo.Path() {
-				featureWorktreePath = wt
-				break
-			}
-		}
-
-		assert.NotEmpty(t, featureWorktreePath, "Should find feature/test worktree")
-		assert.Contains(t, featureWorktreePath, "my-custom-worktrees", "Worktree should be created in custom base_dir")
+		// Hook should have created a file in the centralized worktree path
+		worktreePath := repo.CentralizedWorktreePath("feature/integration")
+		framework.AssertTrue(t, env.FileExists(worktreePath+"/integration-hook.txt"),
+			"Hook-created file should exist in centralized worktree")
 	})
 
-	t.Run("RemoveOnlyManagesWorktreesUnderBaseDir", func(t *testing.T) {
-		repo := env.CreateTestRepo("remove-config-test")
+	t.Run("LegacyFieldsIgnored", func(t *testing.T) {
+		repo := env.CreateTestRepo("legacy-fields")
 
-		// Create initial config
+		// Old-style config with version and base_dir — should be silently ignored in v3
 		config := `version: 1.0
 defaults:
-  base_dir: "../initial-worktrees"
+  base_dir: "../legacy-worktrees"
+hooks:
+  post_create:
+    - type: command
+      command: touch legacy-hook.txt
 `
 		repo.WriteConfig(config)
-		repo.CreateBranch("feature/movable")
+		repo.CreateBranch("feature/legacy")
 
-		// Add worktree with initial config
-		_, err := repo.RunWTP("add", "feature/movable")
+		output, err := repo.RunWTP("add", "feature/legacy")
 		framework.AssertNoError(t, err)
-		framework.AssertWorktreeCount(t, repo, 2)
+		framework.AssertWorktreeCreated(t, output, "feature/legacy")
 
-		// Change config to different base_dir
-		newConfig := `version: 1.0
-defaults:
-  base_dir: "../different-worktrees"
-`
-		repo.WriteConfig(newConfig)
+		// Worktree should be in XDG centralized storage, not in the legacy base_dir
+		centralPath := repo.CentralizedWorktreePath("feature/legacy")
+		framework.AssertTrue(t, env.FileExists(centralPath), "Worktree should exist in centralized storage")
 
-		// Remove should NOT find the worktree because it's outside the new base_dir
-		output, err := repo.RunWTP("remove", "movable")
-		framework.AssertError(t, err)
-		framework.AssertOutputContains(t, output, "not found")
-		framework.AssertWorktreeCount(t, repo, 2) // Still 2 because remove failed
+		legacyPath := env.TmpDir() + "/legacy-worktrees/feature/legacy"
+		framework.AssertFalse(t, env.FileExists(legacyPath), "Legacy base_dir path should NOT be created")
 	})
 
-	t.Run("ListShowsAllWorktreesRegardlessOfConfig", func(t *testing.T) {
-		repo := env.CreateTestRepo("list-config-test")
-
-		// Create worktrees with different configs
-		config1 := `version: 1.0
-defaults:
-  base_dir: "../worktrees-a"
-`
-		repo.WriteConfig(config1)
+	t.Run("ListShowsAllWorktrees", func(t *testing.T) {
+		repo := env.CreateTestRepo("list-all")
 		repo.CreateBranch("feature/a")
-		_, _ = repo.RunWTP("add", "feature/a")
-
-		config2 := `version: 1.0
-defaults:
-  base_dir: "../worktrees-b"
-`
-		repo.WriteConfig(config2)
 		repo.CreateBranch("feature/b")
+
+		_, _ = repo.RunWTP("add", "feature/a")
 		_, _ = repo.RunWTP("add", "feature/b")
 
-		// List should show all worktrees
 		output, err := repo.RunWTP("list")
 		framework.AssertNoError(t, err)
 		framework.AssertOutputContains(t, output, "feature/a")

@@ -9,16 +9,9 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Config represents the wtp configuration
+// Config represents the wtp configuration (hooks only; version and base_dir are no longer used).
 type Config struct {
-	Version  string   `yaml:"version"`
-	Defaults Defaults `yaml:"defaults,omitempty"`
-	Hooks    Hooks    `yaml:"hooks,omitempty"`
-}
-
-// Defaults represents default configuration values
-type Defaults struct {
-	BaseDir string `yaml:"base_dir,omitempty"`
+	Hooks Hooks `yaml:"hooks,omitempty"`
 }
 
 // Hooks represents the post-create hooks configuration
@@ -39,10 +32,6 @@ type Hook struct {
 const (
 	// ConfigFileName is the default filename for the wtp configuration.
 	ConfigFileName = ".wtp.yml"
-	// CurrentVersion represents the current configuration version written to disk.
-	CurrentVersion = "1.0"
-	// DefaultBaseDir is the default directory for new worktrees relative to a repository.
-	DefaultBaseDir = "worktrees"
 	// HookTypeCopy identifies a hook that copies files.
 	HookTypeCopy = "copy"
 	// HookTypeCommand identifies a hook that executes a command.
@@ -52,7 +41,17 @@ const (
 	configFilePermissions = 0o600
 )
 
-// LoadConfig loads configuration from .wtp.yml in the repository root
+// rawConfig is used internally to absorb old YAML fields (version, defaults)
+// without exposing them in Config.
+type rawConfig struct {
+	// Ignored legacy fields — present so yaml.Unmarshal doesn't error on old files.
+	Version  interface{} `yaml:"version"`
+	Defaults interface{} `yaml:"defaults"`
+	Hooks    Hooks       `yaml:"hooks,omitempty"`
+}
+
+// LoadConfig loads configuration from .wtp.yml in the repository root.
+// Old fields (version, defaults/base_dir) are silently ignored.
 func LoadConfig(repoRoot string) (*Config, error) {
 	cleanedRoot := filepath.Clean(repoRoot)
 	if !filepath.IsAbs(cleanedRoot) {
@@ -67,13 +66,7 @@ func LoadConfig(repoRoot string) (*Config, error) {
 
 	// If config file doesn't exist, return default config
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return &Config{
-			Version: CurrentVersion,
-			Defaults: Defaults{
-				BaseDir: "worktrees",
-			},
-			Hooks: Hooks{},
-		}, nil
+		return &Config{Hooks: Hooks{}}, nil
 	}
 
 	// #nosec G304 -- configPath is derived from the validated repository root and fixed file name
@@ -82,10 +75,13 @@ func LoadConfig(repoRoot string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	// Use rawConfig to absorb legacy fields without error.
+	var raw rawConfig
+	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+
+	config := &Config{Hooks: raw.Hooks}
 
 	// Apply defaults, then validate configuration.
 	config.ApplyDefaults()
@@ -93,10 +89,10 @@ func LoadConfig(repoRoot string) (*Config, error) {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	return &config, nil
+	return config, nil
 }
 
-// SaveConfig saves configuration to .git-worktree-plus.yml in the repository root
+// SaveConfig saves configuration to .wtp.yml in the repository root
 func SaveConfig(repoRoot string, config *Config) error {
 	config.ApplyDefaults()
 	if err := config.Validate(); err != nil {
@@ -119,14 +115,6 @@ func SaveConfig(repoRoot string, config *Config) error {
 
 // ApplyDefaults applies default values to the configuration in-place.
 func (c *Config) ApplyDefaults() {
-	if c.Version == "" {
-		c.Version = CurrentVersion
-	}
-
-	if c.Defaults.BaseDir == "" {
-		c.Defaults.BaseDir = DefaultBaseDir
-	}
-
 	for i := range c.Hooks.PostCreate {
 		c.Hooks.PostCreate[i].ApplyDefaults()
 	}
@@ -195,13 +183,4 @@ func (h *Hook) Validate() error {
 // HasHooks returns true if the configuration has any post-create hooks
 func (c *Config) HasHooks() bool {
 	return len(c.Hooks.PostCreate) > 0
-}
-
-// ResolveWorktreePath resolves the full path for a worktree given a name
-func (c *Config) ResolveWorktreePath(repoRoot, worktreeName string) string {
-	baseDir := c.Defaults.BaseDir
-	if !filepath.IsAbs(baseDir) {
-		baseDir = filepath.Join(repoRoot, baseDir)
-	}
-	return filepath.Join(baseDir, worktreeName)
 }

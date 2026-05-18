@@ -8,45 +8,58 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/urfave/cli/v3"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 
-	"github.com/satococoa/wtp/v2/internal/command"
-	"github.com/satococoa/wtp/v2/internal/config"
-	"github.com/satococoa/wtp/v2/internal/errors"
-	"github.com/satococoa/wtp/v2/internal/git"
+	"github.com/satococoa/wtp/v3/internal/cache"
+	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/satococoa/wtp/v3/internal/config"
+	"github.com/satococoa/wtp/v3/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/git"
+	"github.com/satococoa/wtp/v3/internal/github"
+	"github.com/satococoa/wtp/v3/internal/remote"
+	"github.com/satococoa/wtp/v3/internal/state"
+	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
 // Display constants
 const (
-	pathHeaderDashes   = 4
 	branchHeaderDashes = 6
 	headDisplayLength  = 8
 	detachedKeyword    = "detached"
+	ghHintFileName     = ".gh-hint-shown"
 )
 
 const (
-	defaultMaxPathWidth = 56
+	defaultMaxPathWidth = 56 // also used as default max branch column width
 	superWideThreshold  = 160
-	pathPadding         = 2
-	minPathWidth        = 20
-	columnSpacing       = 3
-	columnSpacingSlots  = 3
+	columnSep           = 2 // spaces between columns
+	minBranchWidth      = 6 // minimum branch column width = len("BRANCH")
 )
 
-// GitRepository interface for mocking
-type GitRepository interface {
-	GetWorktrees() ([]git.Worktree, error)
+// worktreePRCI holds PR/CI display data for a single worktree, keyed by branch name.
+type worktreePRCI struct {
+	prFmt string
+	ciFmt string
 }
 
 // Variables to allow mocking in tests
 var (
-	listGetwd         = os.Getwd
-	listNewRepository = func(path string) (GitRepository, error) {
-		return git.NewRepository(path)
+	listGetwd        = os.Getwd
+	listNewGitRepo   = git.NewRepository
+	listGetRemoteURL = func(mainRepoPath string) (string, error) {
+		repo, err := git.NewRepository(mainRepoPath)
+		if err != nil {
+			return "", err
+		}
+		return repo.GetRemoteURL("origin")
 	}
-	listNewExecutor  = command.NewRealExecutor // Add this for mocking
+	listNewExecutor  = command.NewRealExecutor
 	getTerminalWidth = func() int {
 		width, _, err := term.GetSize(int(os.Stdout.Fd()))
 		if err != nil || width <= 0 {
@@ -54,6 +67,9 @@ var (
 		}
 		return width
 	}
+	listIsGHAvailable  = github.IsAvailable
+	listGetPRForBranch = github.GetPRForBranch
+	listGetCIStatus    = github.GetCIStatus
 )
 
 // NewListCommand creates the list command definition
@@ -62,7 +78,7 @@ func NewListCommand() *cli.Command {
 		Name:          "list",
 		Aliases:       []string{"ls"},
 		Usage:         "List all worktrees",
-		Description:   "Shows all worktrees with their paths, branches, and HEAD commits.",
+		Description:   "Shows all worktrees with their branches, PR/CI status, and HEAD commits.",
 		ShellComplete: completeList,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
@@ -71,81 +87,78 @@ func NewListCommand() *cli.Command {
 				Usage:   "Minimize column widths for narrow or redirected output",
 			},
 			&cli.IntFlag{
-				Name:  "max-path-width",
-				Usage: fmt.Sprintf("Maximum width for PATH column (default %d)", defaultMaxPathWidth),
-				Value: defaultMaxPathWidth,
+				Name:    "max-branch-width",
+				Aliases: []string{"max-path-width"}, // max-path-width kept as backward-compat alias
+				Usage:   fmt.Sprintf("Maximum width for BRANCH column (default %d)", defaultMaxPathWidth),
+				Value:   defaultMaxPathWidth,
 			},
 			&cli.BoolFlag{
 				Name:    "quiet",
 				Aliases: []string{"q"},
-				Usage:   "Only display worktree paths",
+				Usage:   "Only display branch names",
+			},
+			&cli.BoolFlag{
+				Name:  "all",
+				Usage: "Show archived worktrees",
+			},
+			&cli.BoolFlag{
+				Name:  "no-sync",
+				Usage: "Skip gh calls and auto-archive",
 			},
 		},
 		Action: listCommand,
 	}
 }
 
-func listCommand(_ context.Context, cmd *cli.Command) error {
-	// Get current working directory (should be a git repository)
+func listCommand(ctx context.Context, cmd *cli.Command) error {
 	cwd, err := listGetwd()
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	// Initialize repository to check if we're in a git repo
-	repo, err := listNewRepository(cwd)
+	repo, err := listNewGitRepo(cwd)
 	if err != nil {
 		return errors.NotInGitRepository()
 	}
 
-	// Get main worktree path
-	mainRepoPath, err := repo.(*git.Repository).GetMainWorktreePath()
+	mainRepoPath, err := repo.GetMainWorktreePath()
 	if err != nil {
 		return errors.GitCommandFailed("get main worktree path", err.Error())
 	}
 
-	// Get the writer from cli.Command
 	w := cmd.Root().Writer
 	if w == nil {
 		w = os.Stdout
 	}
 
-	// Load config to get base_dir
-	cfg, _ := config.LoadConfig(mainRepoPath)
-
-	// Resolve display options
 	opts := resolveListDisplayOptions(cmd, w)
+	opts.Quiet = cmd.Bool("quiet")
+	opts.ShowAll = cmd.Bool("all")
+	opts.NoSync = cmd.Bool("no-sync")
 
-	// Get quiet flag
-	quiet := cmd.Bool("quiet")
-
-	// Use CommandExecutor-based implementation
 	executor := listNewExecutor()
-	return listCommandWithCommandExecutor(cmd, w, executor, cfg, mainRepoPath, quiet, opts)
+	return listCommandWithCommandExecutor(ctx, cmd, w, executor, mainRepoPath, opts)
 }
 
-func listCommandWithCommandExecutor(
-	_ *cli.Command, w io.Writer, executor command.Executor, cfg *config.Config, mainRepoPath string, quiet bool,
+func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many distinct display paths
+	ctx context.Context, _ *cli.Command, w io.Writer, executor command.Executor, mainRepoPath string,
 	opts listDisplayOptions,
 ) error {
-	// Get current working directory
 	cwd, err := listGetwd()
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	// Get worktrees using CommandExecutor
 	listCmd := command.GitWorktreeList()
 	result, err := executor.Execute([]command.Command{listCmd})
 	if err != nil {
 		return errors.GitCommandFailed("git worktree list", err.Error())
 	}
 
-	// Parse worktrees from command output
 	worktrees := parseWorktreesFromOutput(result.Results[0].Output)
 
 	if len(worktrees) == 0 {
-		if !quiet {
+		if !opts.Quiet {
 			if _, err := fmt.Fprintln(w, "No worktrees found"); err != nil {
 				return err
 			}
@@ -153,25 +166,277 @@ func listCommandWithCommandExecutor(
 		return nil
 	}
 
-	// Display worktrees
-	if quiet {
-		if err := displayWorktreesQuiet(w, worktrees, cfg, mainRepoPath); err != nil {
-			return err
-		}
-	} else {
-		termWidth := getTerminalWidth()
-		if !opts.Compact {
-			if !opts.OutputIsTTY {
-				opts.Compact = true
-			} else if termWidth >= superWideThreshold {
-				opts.Compact = true
-			}
-		}
-		if err := displayWorktreesRelative(w, worktrees, cwd, cfg, mainRepoPath, termWidth, opts); err != nil {
-			return err
+	// Try to get remote URL for state/cache key derivation
+	var repoID *remote.RepoIdentifier
+	if remoteURL, rerr := listGetRemoteURL(mainRepoPath); rerr == nil {
+		if id, perr := remote.Parse(remoteURL); perr == nil {
+			repoID = &id
 		}
 	}
+
+	// Load state
+	stateStore := state.NewStore()
+	st, _ := stateStore.Load()
+
+	// Build set of archived branches
+	archivedBranches := make(map[string]bool)
+	if repoID != nil {
+		for _, wt := range worktrees {
+			if wt.Branch != "" && !wt.IsMain {
+				key := repoID.StateKey(wt.Branch)
+				if st.Worktrees[key].Archived {
+					archivedBranches[wt.Branch] = true
+				}
+			}
+		}
+	}
+
+	// Filter out archived worktrees unless --all
+	displayWorktrees := make([]git.Worktree, 0, len(worktrees))
+	for _, wt := range worktrees {
+		if !opts.ShowAll && archivedBranches[wt.Branch] {
+			continue
+		}
+		displayWorktrees = append(displayWorktrees, wt)
+	}
+
+	// PR/CI data collection
+	prciData := make(map[string]worktreePRCI)
+	ghAvailable := listIsGHAvailable()
+
+	if ghAvailable && !opts.NoSync && !opts.Quiet && repoID != nil {
+		if err := fetchPRCIData(ctx, displayWorktrees, repoID, stateStore, archivedBranches, prciData); err != nil {
+			return err
+		}
+
+		// Rebuild displayWorktrees after auto-archiving (unless --all)
+		if !opts.ShowAll {
+			remaining := make([]git.Worktree, 0, len(displayWorktrees))
+			for _, wt := range displayWorktrees {
+				if !archivedBranches[wt.Branch] {
+					remaining = append(remaining, wt)
+				}
+			}
+			displayWorktrees = remaining
+		}
+	} else if !ghAvailable && !opts.Quiet {
+		maybeShowGHNotAvailableHint()
+	}
+
+	if opts.Quiet {
+		return displayWorktreesQuiet(w, displayWorktrees)
+	}
+
+	termWidth := getTerminalWidth()
+	if !opts.Compact {
+		if !opts.OutputIsTTY {
+			opts.Compact = true
+		} else if termWidth >= superWideThreshold {
+			// On super-wide terminals (>=160 cols), enable compact mode to prevent
+			// comically wide BRANCH columns that waste horizontal space.
+			opts.Compact = true
+		}
+	}
+
+	return displayWorktreesTable(w, displayWorktrees, cwd, ghAvailable, prciData, archivedBranches, termWidth, opts)
+}
+
+// prciFromCache builds a worktreePRCI entry from a cached record.
+func prciFromCache(cached *cache.WorktreeCache) worktreePRCI {
+	prFmt := ""
+	if cached.PRNumber > 0 {
+		prFmt = github.FormatPRState(&github.PRInfo{
+			Number: cached.PRNumber,
+			State:  cached.PRState,
+		})
+	}
+	return worktreePRCI{
+		prFmt: prFmt,
+		ciFmt: cached.CIStatus,
+	}
+}
+
+// prciSharedState holds the shared mutable state passed to per-branch fetch goroutines.
+type prciSharedState struct {
+	mu               sync.Mutex
+	errorCount       atomic.Int32
+	newEntries       map[string]cache.WorktreeCache
+	archivedBranches map[string]bool
+	prciData         map[string]worktreePRCI
+}
+
+// archiveRequest records a branch that needs to be archived after releasing the mutex.
+type archiveRequest struct {
+	branch   string
+	prNumber int
+}
+
+// fetchPRCIForBranch fetches PR/CI data for a single branch and updates shared state.
+// Network calls and archive I/O are made outside the lock; only map writes are protected by mu.
+func fetchPRCIForBranch(
+	ctx context.Context,
+	wt git.Worktree,
+	key string,
+	repoID *remote.RepoIdentifier,
+	stateStore *state.Store,
+	cacheStore *cache.Store,
+	ttl time.Duration,
+	shared *prciSharedState,
+) error {
+	// Use cached data if fresh
+	if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
+		handleCachedPRCI(wt.Branch, &cached, repoID, stateStore, shared)
+		return nil
+	}
+
+	// Fetch fresh data — network calls outside the lock.
+	// CI checks require a PR, so skip the CI call when there's no PR to avoid
+	// a wasted round-trip that always returns "no pull requests found".
+	pr, prErr := listGetPRForBranch(ctx, wt.Branch)
+	var ci *github.CIStatus
+	var ciErr error
+	if pr != nil {
+		ci, ciErr = listGetCIStatus(ctx, wt.Branch)
+	}
+	if prErr != nil || ciErr != nil {
+		shared.errorCount.Add(1)
+	}
+
+	prFmt := github.FormatPRState(pr)
+	ciFmt := github.FormatCIStatus(ci)
+
+	toArchive := updateSharedWithFreshData(wt.Branch, key, pr, prErr, ciErr, prFmt, ciFmt, shared)
+
+	if toArchive != nil {
+		autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
+	}
+
 	return nil
+}
+
+// handleCachedPRCI updates shared state from a valid cache entry and triggers
+// auto-archive if the PR was merged. I/O happens outside the mutex.
+func handleCachedPRCI(
+	branch string,
+	cached *cache.WorktreeCache,
+	repoID *remote.RepoIdentifier,
+	stateStore *state.Store,
+	shared *prciSharedState,
+) {
+	var toArchive *archiveRequest
+
+	shared.mu.Lock()
+	shared.prciData[branch] = prciFromCache(cached)
+	if cached.PRState == github.StateMerged && !shared.archivedBranches[branch] {
+		shared.archivedBranches[branch] = true
+		toArchive = &archiveRequest{branch: branch, prNumber: cached.PRNumber}
+	}
+	shared.mu.Unlock()
+
+	if toArchive != nil {
+		autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
+	}
+}
+
+// updateSharedWithFreshData writes freshly-fetched PR/CI data into shared state
+// under the mutex. Returns an archiveRequest if the branch needs auto-archiving.
+func updateSharedWithFreshData(
+	branch, key string,
+	pr *github.PRInfo,
+	prErr, ciErr error,
+	prFmt, ciFmt string,
+	shared *prciSharedState,
+) *archiveRequest {
+	var toArchive *archiveRequest
+
+	shared.mu.Lock()
+
+	// Only cache successful fetches — partial failures would poison the
+	// cache with PRNumber=0/PRState="" and suppress fresh attempts until
+	// the TTL expires.
+	if prErr == nil && ciErr == nil {
+		entry := cache.WorktreeCache{CIStatus: ciFmt}
+		if pr != nil {
+			entry.PRNumber = pr.Number
+			entry.PRState = pr.State
+			entry.PRTitle = pr.Title
+		}
+		shared.newEntries[key] = entry
+	}
+
+	shared.prciData[branch] = worktreePRCI{
+		prFmt: prFmt,
+		ciFmt: ciFmt,
+	}
+
+	if pr != nil && pr.State == github.StateMerged && !shared.archivedBranches[branch] {
+		shared.archivedBranches[branch] = true
+		toArchive = &archiveRequest{branch: branch, prNumber: pr.Number}
+	}
+
+	shared.mu.Unlock()
+
+	return toArchive
+}
+
+// fetchPRCIData fetches PR/CI info for non-main non-detached worktrees, updating prciData and
+// archivedBranches in-place. Auto-archive notices are printed to stderr.
+// Fetches across branches are parallelized using errgroup.
+func fetchPRCIData(
+	ctx context.Context,
+	worktrees []git.Worktree,
+	repoID *remote.RepoIdentifier,
+	stateStore *state.Store,
+	archivedBranches map[string]bool,
+	prciData map[string]worktreePRCI,
+) error {
+	cacheStore := cache.NewStore()
+	globalCfg, _ := config.LoadGlobalConfig()
+	ttl := globalCfg.CacheTTL
+
+	shared := &prciSharedState{
+		newEntries:       make(map[string]cache.WorktreeCache),
+		archivedBranches: archivedBranches,
+		prciData:         prciData,
+	}
+
+	g, gCtx := errgroup.WithContext(ctx)
+
+	for _, wt := range worktrees {
+		if wt.Branch == "" || wt.Branch == detachedKeyword || wt.IsMain {
+			continue
+		}
+
+		key := repoID.StateKey(wt.Branch)
+		g.Go(func() error {
+			return fetchPRCIForBranch(gCtx, wt, key, repoID, stateStore, cacheStore, ttl, shared)
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	if count := shared.errorCount.Load(); count > 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: failed to fetch PR/CI status for %d branch(es)\n", count)
+	}
+
+	_ = cacheStore.SetBatch(shared.newEntries)
+	return nil
+}
+
+// autoArchiveBranch persists the archived flag and prints a notice to stderr.
+// The caller is responsible for setting archivedBranches[branch] = true under the mutex
+// before calling this function, so no shared map mutation happens here.
+func autoArchiveBranch(
+	branch string,
+	prNumber int,
+	repoID *remote.RepoIdentifier,
+	stateStore *state.Store,
+) {
+	key := repoID.StateKey(branch)
+	_ = stateStore.SetArchived(key, true)
+	_, _ = fmt.Fprintf(os.Stderr, "Auto-archived %s (PR #%d merged)\n", branch, prNumber)
 }
 
 // completeList provides shell completion for the list command (flags only)
@@ -189,7 +454,6 @@ func parseWorktreesFromOutput(output string) []git.Worktree {
 	for _, line := range lines {
 		if line == "" {
 			if currentWorktree.Path != "" {
-				// First worktree is always the main worktree
 				if isFirst {
 					currentWorktree.IsMain = true
 					isFirst = false
@@ -212,7 +476,6 @@ func parseWorktreesFromOutput(output string) []git.Worktree {
 	}
 
 	if currentWorktree.Path != "" {
-		// First worktree is always the main worktree
 		if isFirst {
 			currentWorktree.IsMain = true
 		}
@@ -222,15 +485,10 @@ func parseWorktreesFromOutput(output string) []git.Worktree {
 	return worktrees
 }
 
-// isWorktreeManagedList determines if a worktree is managed by wtp (for list command)
-func isWorktreeManagedList(worktreePath string, cfg *config.Config, mainRepoPath string, isMain bool) bool {
-	return isWorktreeManagedCommon(worktreePath, cfg, mainRepoPath, isMain)
-}
-
-// formatBranchDisplay formats branch name for display, following Git conventions
+// formatBranchDisplay formats branch name for display in the BRANCH column.
 func formatBranchDisplay(branch string) string {
 	if branch == detachedKeyword {
-		return "(detached HEAD)"
+		return "(detached)"
 	}
 	if branch == "" {
 		return "(no branch)"
@@ -238,243 +496,242 @@ func formatBranchDisplay(branch string) string {
 	return branch
 }
 
-// truncatePath truncates a path to fit within the given width, showing beginning and end
-func truncatePath(path string, maxWidth int) string {
-	if len(path) <= maxWidth {
-		return path
-	}
-
-	// Reserve space for ellipsis "..."
-	const ellipsis = "..."
-	if maxWidth <= len(ellipsis) {
-		return path[:maxWidth]
-	}
-
-	availableWidth := maxWidth - len(ellipsis)
-	// Show more of the end (file/directory name) than the beginning
-	startLen := availableWidth / 3 //nolint:mnd // Show 1/3 of start, 2/3 of end
-	endLen := availableWidth - startLen
-
-	return path[:startLen] + ellipsis + path[len(path)-endLen:]
-}
-
-// getWorktreeDisplayName returns the display name for a worktree, with fallback for nil config
-func getWorktreeDisplayName(wt git.Worktree, cfg *config.Config, mainRepoPath string) string {
-	if cfg != nil {
-		return getWorktreeNameFromPath(wt.Path, cfg, mainRepoPath, wt.IsMain)
-	}
-	// Fallback when config can't be loaded
-	if wt.IsMain {
-		return "@"
-	}
-	return filepath.Base(wt.Path)
-}
-
-// displayWorktreesQuiet outputs only the worktree names (as shown in PATH column), one per line
-func displayWorktreesQuiet(w io.Writer, worktrees []git.Worktree, cfg *config.Config, mainRepoPath string) error {
+// displayWorktreesQuiet outputs branch names only, one per line.
+// Outputs "@" for the main worktree. Detached HEAD worktrees are omitted.
+func displayWorktreesQuiet(w io.Writer, worktrees []git.Worktree) error {
 	for _, wt := range worktrees {
-		pathDisplay := getWorktreeDisplayName(wt, cfg, mainRepoPath)
-		if _, err := fmt.Fprintln(w, pathDisplay); err != nil {
+		// Omit detached HEAD and empty branch worktrees from quiet output
+		if wt.Branch == detachedKeyword || wt.Branch == "" {
+			continue
+		}
+		var name string
+		if wt.IsMain {
+			name = "@"
+		} else {
+			name = wt.Branch
+		}
+		if _, err := fmt.Fprintln(w, name); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
-// displayWorktreesRelative formats and displays worktree information with relative paths
-func displayWorktreesRelative(
-	w io.Writer, worktrees []git.Worktree, currentPath string, cfg *config.Config, mainRepoPath string,
-	termWidth int, opts listDisplayOptions,
+// listRow holds display data for one row in the worktree table.
+type listRow struct {
+	branchDisplay string
+	pr            string
+	ci            string
+	head          string
+}
+
+// displayWorktreesTable renders the tabular worktree list.
+func displayWorktreesTable(
+	w io.Writer,
+	worktrees []git.Worktree,
+	currentPath string,
+	ghAvailable bool,
+	prciData map[string]worktreePRCI,
+	archivedBranches map[string]bool,
+	termWidth int,
+	opts listDisplayOptions,
 ) error {
 	if termWidth <= 0 {
 		termWidth = 80
 	}
 
-	items, metrics := collectListDisplayData(worktrees, currentPath, cfg, mainRepoPath)
-	if len(items) == 0 {
+	rows, maxBranch, maxPR, maxCI := buildListRows(worktrees, currentPath, ghAvailable, prciData, archivedBranches)
+	if len(rows) == 0 {
 		return nil
 	}
 
-	pathWidth, branchWidth, statusWidth := computeListColumnWidths(metrics, termWidth, opts)
+	bw, prw, ciw := computeListColumns(maxBranch, maxPR, maxCI, termWidth, ghAvailable, opts)
 
-	if _, err := fmt.Fprintf(
-		w,
-		"%-*s %-*s %-*s %s\n",
-		pathWidth, "PATH",
-		branchWidth, "BRANCH",
-		statusWidth, "STATUS",
-		"HEAD",
-	); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "%-*s %-*s %-*s %s\n",
-		pathWidth, strings.Repeat("-", pathHeaderDashes),
-		branchWidth, strings.Repeat("-", branchHeaderDashes),
-		statusWidth, strings.Repeat("-", len("STATUS")),
-		"----"); err != nil {
-		return err
+	// Print header
+	if ghAvailable {
+		if _, err := fmt.Fprintf(w, "%-*s  %-*s  %-*s  %s\n", bw, "BRANCH", prw, "PR", ciw, "CI", "HEAD"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "%-*s  %-*s  %-*s  %s\n",
+			bw, strings.Repeat("-", branchHeaderDashes),
+			prw, "--",
+			ciw, "--",
+			"----"); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintf(w, "%-*s  %s\n", bw, "BRANCH", "HEAD"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "%-*s  %s\n", bw, strings.Repeat("-", branchHeaderDashes), "----"); err != nil {
+			return err
+		}
 	}
 
-	for _, item := range items {
-		headShort := item.head
-		if len(headShort) > headDisplayLength {
-			headShort = headShort[:headDisplayLength]
+	for _, row := range rows {
+		head := row.head
+		if len(head) > headDisplayLength {
+			head = head[:headDisplayLength]
 		}
 
-		if _, err := fmt.Fprintf(w, "%-*s %-*s %-*s %s\n",
-			pathWidth, truncatePath(item.path, pathWidth),
-			branchWidth, truncatePath(item.branch, branchWidth),
-			statusWidth, truncatePath(item.status, statusWidth),
-			headShort); err != nil {
-			return err
+		branch := truncateStr(row.branchDisplay, bw)
+		if ghAvailable {
+			pr := truncateStr(row.pr, prw)
+			ci := truncateStr(row.ci, ciw)
+			if _, err := fmt.Fprintf(w, "%-*s  %-*s  %-*s  %s\n", bw, branch, prw, pr, ciw, ci, head); err != nil {
+				return err
+			}
+		} else {
+			if _, err := fmt.Fprintf(w, "%-*s  %s\n", bw, branch, head); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-type listDisplayData struct {
-	path   string
-	branch string
-	head   string
-	status string
-}
-
-type listColumnMetrics struct {
-	maxPathLen   int
-	maxBranchLen int
-	maxStatusLen int
-}
-
-func collectListDisplayData(
-	worktrees []git.Worktree, currentPath string, cfg *config.Config, mainRepoPath string,
-) ([]listDisplayData, listColumnMetrics) {
-	metrics := listColumnMetrics{
-		maxPathLen:   len("PATH"),
-		maxBranchLen: len("BRANCH"),
-		maxStatusLen: len("STATUS"),
-	}
-
-	items := make([]listDisplayData, 0, len(worktrees))
+// buildListRows constructs display rows and measures max column widths.
+func buildListRows(
+	worktrees []git.Worktree,
+	currentPath string,
+	ghAvailable bool,
+	prciData map[string]worktreePRCI,
+	archivedBranches map[string]bool,
+) (rows []listRow, maxBranch, maxPR, maxCI int) {
+	maxBranch = len("BRANCH")
+	maxPR = len("PR")
+	maxCI = len("CI")
 
 	for _, wt := range worktrees {
-		pathDisplay := getWorktreeDisplayName(wt, cfg, mainRepoPath)
-		if wt.Path == currentPath {
-			pathDisplay += "*"
-		}
-
 		branchDisplay := formatBranchDisplay(wt.Branch)
-
-		statusDisplay := "unmanaged"
-		if isWorktreeManagedList(wt.Path, cfg, mainRepoPath, wt.IsMain) {
-			statusDisplay = "managed"
+		if wt.IsMain {
+			branchDisplay = "@"
+		}
+		if wt.Path == currentPath {
+			branchDisplay += "*"
+		}
+		if archivedBranches[wt.Branch] {
+			branchDisplay += " (archived)"
 		}
 
-		if len(pathDisplay) > metrics.maxPathLen {
-			metrics.maxPathLen = len(pathDisplay)
-		}
-		if len(branchDisplay) > metrics.maxBranchLen {
-			metrics.maxBranchLen = len(branchDisplay)
-		}
-		if len(statusDisplay) > metrics.maxStatusLen {
-			metrics.maxStatusLen = len(statusDisplay)
+		var pr, ci string
+		if ghAvailable && !wt.IsMain && wt.Branch != detachedKeyword && wt.Branch != "" {
+			if data, ok := prciData[wt.Branch]; ok {
+				pr = data.prFmt
+				ci = data.ciFmt
+			}
 		}
 
-		items = append(items, listDisplayData{
-			path:   pathDisplay,
-			branch: branchDisplay,
-			head:   wt.HEAD,
-			status: statusDisplay,
-		})
+		row := listRow{
+			branchDisplay: branchDisplay,
+			pr:            pr,
+			ci:            ci,
+			head:          wt.HEAD,
+		}
+		rows = append(rows, row)
+
+		if len(branchDisplay) > maxBranch {
+			maxBranch = len(branchDisplay)
+		}
+		if len(pr) > maxPR {
+			maxPR = len(pr)
+		}
+		if len(ci) > maxCI {
+			maxCI = len(ci)
+		}
 	}
 
-	return items, metrics
+	return rows, maxBranch, maxPR, maxCI
 }
 
-func computeListColumnWidths(
-	metrics listColumnMetrics,
-	termWidth int,
+// computeListColumns determines column widths.
+func computeListColumns(
+	maxBranch, maxPR, maxCI, termWidth int,
+	ghAvailable bool,
 	opts listDisplayOptions,
-) (pathWidth, branchWidth, statusWidth int) {
-	branchWidth, statusWidth = clampBranchAndStatusWidths(metrics.maxBranchLen, metrics.maxStatusLen, termWidth)
-	pathWidth = derivePathWidth(metrics.maxPathLen, branchWidth, statusWidth, termWidth, opts)
-	return pathWidth, branchWidth, statusWidth
-}
-
-func clampBranchAndStatusWidths(
-	maxBranchLen, maxStatusLen, termWidth int,
-) (branchWidth, statusWidth int) {
-	branchWidth = maxBranchLen
-	statusWidth = maxStatusLen
-
-	branchHeaderWidth := len("BRANCH")
-	statusHeaderWidth := len("STATUS")
-
-	if branchWidth < branchHeaderWidth {
-		branchWidth = branchHeaderWidth
-	}
-	if statusWidth < statusHeaderWidth {
-		statusWidth = statusHeaderWidth
+) (bw, prw, ciw int) {
+	prw = 0
+	ciw = 0
+	if ghAvailable {
+		prw = maxPR
+		ciw = maxCI
 	}
 
-	spacingTotal := columnSpacing * columnSpacingSlots
-	maxAvailableForBranch := termWidth - minPathWidth - statusWidth - spacingTotal - headDisplayLength
-	if branchWidth > maxAvailableForBranch {
-		branchWidth = maxAvailableForBranch
-		if branchWidth < branchHeaderWidth {
-			branchWidth = branchHeaderWidth
-		}
+	// Available width for branch column
+	available := termWidth - columnSep - headDisplayLength
+	if ghAvailable {
+		available -= columnSep + prw + columnSep + ciw
 	}
 
-	return branchWidth, statusWidth
-}
-
-func derivePathWidth(maxPathLen, branchWidth, statusWidth, termWidth int, opts listDisplayOptions) int {
-	pathHeaderWidth := len("PATH")
-	availableForPath := termWidth - columnSpacing - branchWidth - columnSpacing - statusWidth -
-		columnSpacing - headDisplayLength
-	availableForPath = max(availableForPath, pathHeaderWidth)
-
-	pathWidth := availableForPath
-
-	if opts.Compact {
-		pathWidth = clampCompactPathWidth(pathWidth, maxPathLen)
-	} else {
-		pathWidth = clampExpandedPathWidth(pathWidth, maxPathLen)
+	bw = maxBranch
+	if bw > available {
+		bw = available
+	}
+	if bw < minBranchWidth {
+		bw = minBranchWidth
 	}
 
 	if opts.MaxPathWidth > 0 {
-		pathWidth = min(pathWidth, opts.MaxPathWidth)
+		bw = min(bw, opts.MaxPathWidth)
+		if bw < minBranchWidth {
+			bw = minBranchWidth
+		}
 	}
 
-	pathWidth = max(min(pathWidth, availableForPath), pathHeaderWidth)
+	if opts.Compact {
+		bw = min(bw, maxBranch)
+		if bw < minBranchWidth {
+			bw = minBranchWidth
+		}
+	}
 
-	return pathWidth
+	return bw, prw, ciw
 }
 
-func clampCompactPathWidth(currentWidth, maxPathLen int) int {
-	pathHeaderWidth := len("PATH")
-	minCompactWidth := max(maxPathLen, pathHeaderWidth)
-	return max(min(currentWidth, minCompactWidth), pathHeaderWidth)
+// truncateStr truncates a string to fit within maxWidth (in runes), using ellipsis.
+func truncateStr(s string, maxWidth int) string {
+	runes := []rune(s)
+	if maxWidth <= 0 || len(runes) <= maxWidth {
+		return s
+	}
+
+	const ellipsis = "..."
+	ellipsisLen := len([]rune(ellipsis)) // 3
+	if maxWidth <= ellipsisLen {
+		return string(runes[:maxWidth])
+	}
+
+	availableWidth := maxWidth - ellipsisLen
+	startLen := availableWidth / 3 //nolint:mnd // show 1/3 start, 2/3 end
+	endLen := availableWidth - startLen
+
+	return string(runes[:startLen]) + ellipsis + string(runes[len(runes)-endLen:])
 }
 
-func clampExpandedPathWidth(currentWidth, maxPathLen int) int {
-	pathHeaderWidth := len("PATH")
-
-	desiredWidth := max(maxPathLen+pathPadding, minPathWidth, pathHeaderWidth)
-	return max(min(currentWidth, desiredWidth), minPathWidth)
+// maybeShowGHNotAvailableHint shows a one-time hint about the gh CLI being unavailable.
+func maybeShowGHNotAvailableHint() {
+	hintFile := filepath.Join(xdg.WtpDataDir(), ghHintFileName)
+	if _, err := os.Stat(hintFile); err == nil {
+		return // already shown
+	}
+	_, _ = fmt.Fprintln(os.Stderr, "hint: install 'gh' CLI for PR/CI status in wtp list")
+	_ = xdg.EnsureDir(xdg.WtpDataDir())
+	_ = os.WriteFile(hintFile, []byte{}, 0o644) //nolint:gosec,mnd // hint file, world-readable is fine
 }
 
 type listDisplayOptions struct {
 	Compact      bool
 	MaxPathWidth int
 	OutputIsTTY  bool
+	Quiet        bool
+	ShowAll      bool
+	NoSync       bool
 }
 
 func resolveListDisplayOptions(cmd *cli.Command, w io.Writer) listDisplayOptions {
-	maxPathWidth := cmd.Int("max-path-width")
-	if maxPathWidth == defaultMaxPathWidth && !cmd.IsSet("max-path-width") {
+	maxPathWidth := cmd.Int("max-branch-width")
+	if maxPathWidth == defaultMaxPathWidth && !cmd.IsSet("max-branch-width") && !cmd.IsSet("max-path-width") {
 		if envValue := os.Getenv("WTP_LIST_MAX_PATH"); envValue != "" {
 			if parsed, err := strconv.Atoi(envValue); err == nil && parsed > 0 {
 				maxPathWidth = parsed

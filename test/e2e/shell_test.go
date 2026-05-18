@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/satococoa/wtp/v2/test/e2e/framework"
+	"github.com/satococoa/wtp/v3/test/e2e/framework"
 )
 
 func TestShellIntegration(t *testing.T) {
@@ -34,12 +34,12 @@ func TestShellIntegration(t *testing.T) {
 		repo.CreateBranch("test-branch")
 		_, _ = repo.RunWTP("add", "test-branch")
 
-		// cd should always output the path
+		// cd outputs the absolute path for the branch
 		output, err := repo.RunWTP("cd", "test-branch")
 		framework.AssertNoError(t, err)
 		framework.AssertOutputContains(t, output, "test-branch")
 
-		// Output should be a valid path
+		// Output should be a path in centralized storage containing the branch name
 		outputPath := strings.TrimSpace(output)
 		framework.AssertTrue(t, strings.Contains(outputPath, "test-branch"), "Should contain worktree name")
 	})
@@ -49,14 +49,13 @@ func TestShellIntegration(t *testing.T) {
 		repo.CreateBranch("feature/test")
 		_, _ = repo.RunWTP("add", "feature/test")
 
-		// cd should resolve branch name to path
-		output, err := repo.RunWTP("cd", "test")
+		// cd uses exact branch name matching in v3
+		output, err := repo.RunWTP("cd", "feature/test")
 		framework.AssertNoError(t, err)
-		// Should output the path
+		// Should output a path containing the branch name segment
 		framework.AssertTrue(t,
-			strings.Contains(output, "worktrees/feature/test") ||
-				strings.Contains(output, "feature/test"),
-			"Should output worktree path")
+			strings.Contains(output, "feature/test"),
+			"Should output worktree path containing branch name, got: "+output)
 
 		// Should not contain error messages
 		framework.AssertFalse(t,

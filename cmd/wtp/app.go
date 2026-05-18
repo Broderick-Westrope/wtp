@@ -27,6 +27,9 @@ func newApp() *cli.Command {
 			// Built-in completion is automatically provided by urfave/cli
 			NewHookCommand(),
 			NewShellInitCommand(),
+			NewArchiveCommand(),
+			NewUnarchiveCommand(),
+			NewDoctorCommand(),
 		},
 	}
 }

@@ -10,20 +10,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/satococoa/wtp/v2/internal/testutil"
+	"github.com/satococoa/wtp/v3/internal/testutil"
 )
 
 const (
 	dirPerm  = 0755
 	filePerm = 0600
+
+	// DefaultOriginURL is the git remote URL added to every test repo so that
+	// wtp add (which requires an origin remote) resolves the centralized storage
+	// path as $XDG_DATA_HOME/wtp/worktrees/test/repo/<branch>.
+	DefaultOriginURL = "https://github.com/test/repo.git"
 )
 
 // TestEnvironment manages the temporary state for an end-to-end test run.
 type TestEnvironment struct {
-	t         *testing.T
-	tmpDir    string
-	wtpBinary string
-	cleanup   []func()
+	t             *testing.T
+	tmpDir        string
+	xdgDataHome   string
+	xdgConfigHome string
+	xdgCacheHome  string
+	wtpBinary     string
+	cleanup       []func()
 }
 
 // NewTestEnvironment builds a new test environment and compiles the wtp binary when needed.
@@ -31,15 +39,35 @@ func NewTestEnvironment(t *testing.T) *TestEnvironment {
 	t.Helper()
 
 	tmpDir := t.TempDir()
+
+	// Create isolated XDG directories so every test run gets its own data/config/cache.
+	xdgDataHome := filepath.Join(tmpDir, "xdg-data")
+	xdgConfigHome := filepath.Join(tmpDir, "xdg-config")
+	xdgCacheHome := filepath.Join(tmpDir, "xdg-cache")
+
+	for _, dir := range []string{xdgDataHome, xdgConfigHome, xdgCacheHome} {
+		if err := os.MkdirAll(dir, dirPerm); err != nil {
+			t.Fatalf("Failed to create XDG directory %s: %v", dir, err)
+		}
+	}
+
 	env := &TestEnvironment{
-		t:       t,
-		tmpDir:  tmpDir,
-		cleanup: []func(){},
+		t:             t,
+		tmpDir:        tmpDir,
+		xdgDataHome:   xdgDataHome,
+		xdgConfigHome: xdgConfigHome,
+		xdgCacheHome:  xdgCacheHome,
+		cleanup:       []func(){},
 	}
 
 	env.buildWTP()
 
 	return env
+}
+
+// XDGDataHome returns the isolated XDG_DATA_HOME directory for this test environment.
+func (e *TestEnvironment) XDGDataHome() string {
+	return e.xdgDataHome
 }
 
 func (e *TestEnvironment) buildWTP() {
@@ -93,6 +121,8 @@ func (e *TestEnvironment) findProjectRoot() string {
 }
 
 // CreateTestRepo initializes a new git repository within the test environment.
+// An "origin" remote pointing to DefaultOriginURL is added automatically so that
+// commands such as "wtp add" (which require an origin remote) work out of the box.
 func (e *TestEnvironment) CreateTestRepo(name string) *TestRepo {
 	e.t.Helper()
 
@@ -113,6 +143,9 @@ func (e *TestEnvironment) CreateTestRepo(name string) *TestRepo {
 
 	// Explicitly rename the branch to main if it's not already
 	e.runInDir(repoDir, "git", "branch", "-m", "main")
+
+	// Add default origin remote so that wtp commands that require it work out of the box.
+	e.runInDir(repoDir, "git", "remote", "add", "origin", DefaultOriginURL)
 
 	return &TestRepo{
 		env:  e,
@@ -169,6 +202,12 @@ func (e *TestEnvironment) RunWTP(args ...string) (string, error) {
 
 	// Create command with validated binary path
 	cmd := createSafeCommand(e.wtpBinary, args...)
+	cmd.Env = append(os.Environ(),
+		"HOME="+e.tmpDir,
+		"XDG_DATA_HOME="+e.xdgDataHome,
+		"XDG_CONFIG_HOME="+e.xdgConfigHome,
+		"XDG_CACHE_HOME="+e.xdgCacheHome,
+	)
 	output, err := cmd.CombinedOutput()
 	return string(output), err
 }
@@ -234,7 +273,12 @@ func (r *TestRepo) RunWTP(args ...string) (string, error) {
 	// Create command with validated binary path
 	cmd := createSafeCommand(r.env.wtpBinary, args...)
 	cmd.Dir = r.path
-	cmd.Env = append(os.Environ(), "HOME="+r.env.tmpDir)
+	cmd.Env = append(os.Environ(),
+		"HOME="+r.env.tmpDir,
+		"XDG_DATA_HOME="+r.env.xdgDataHome,
+		"XDG_CONFIG_HOME="+r.env.xdgConfigHome,
+		"XDG_CACHE_HOME="+r.env.xdgCacheHome,
+	)
 
 	output, err := cmd.CombinedOutput()
 	return string(output), err
@@ -260,6 +304,24 @@ func (r *TestRepo) CommitFile(filename, content, message string) {
 // AddRemote adds a git remote to the repository.
 func (r *TestRepo) AddRemote(name, url string) {
 	r.env.runInDir(r.path, "git", "remote", "add", name, url)
+}
+
+// SetRemoteURL sets the URL for an existing remote, or adds it if it does not exist.
+// Use this instead of AddRemote when the repo already has an origin (set by CreateTestRepo).
+func (r *TestRepo) SetRemoteURL(name, url string) {
+	// Try set-url first; if it fails (remote doesn't exist), add it.
+	cmd := exec.Command("git", "remote", "set-url", name, url)
+	cmd.Dir = r.path
+	if err := cmd.Run(); err != nil {
+		r.env.runInDir(r.path, "git", "remote", "add", name, url)
+	}
+}
+
+// CentralizedWorktreePath returns the expected centralized storage path for the given branch
+// when the repository uses the default origin URL (DefaultOriginURL = https://github.com/test/repo.git).
+// Path format: $XDG_DATA_HOME/wtp/worktrees/test/repo/<branch>
+func (r *TestRepo) CentralizedWorktreePath(branch string) string {
+	return filepath.Join(r.env.xdgDataHome, "wtp", "worktrees", "test", "repo", branch)
 }
 
 // CreateRemoteBranch pushes a branch to the specified remote.

@@ -19,7 +19,7 @@ func TestInitVersionUsesBuildInfoWhenDev(t *testing.T) {
 	readBuildInfo = func() (*debug.BuildInfo, bool) {
 		return &debug.BuildInfo{
 			Main: debug.Module{
-				Path:    "github.com/satococoa/wtp/v2",
+				Path:    "github.com/satococoa/wtp/v3",
 				Version: "v2.3.4",
 			},
 		}, true
@@ -42,7 +42,7 @@ func TestInitVersionIgnoresDevelVersion(t *testing.T) {
 	readBuildInfo = func() (*debug.BuildInfo, bool) {
 		return &debug.BuildInfo{
 			Main: debug.Module{
-				Path:    "github.com/satococoa/wtp/v2",
+				Path:    "github.com/satococoa/wtp/v3",
 				Version: "(devel)",
 			},
 		}, true
@@ -65,7 +65,7 @@ func TestInitVersionRespectsPresetVersion(t *testing.T) {
 	readBuildInfo = func() (*debug.BuildInfo, bool) {
 		return &debug.BuildInfo{
 			Main: debug.Module{
-				Path:    "github.com/satococoa/wtp/v2",
+				Path:    "github.com/satococoa/wtp/v3",
 				Version: "v2.3.4",
 			},
 		}, true

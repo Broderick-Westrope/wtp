@@ -14,12 +14,8 @@ func TestLoadConfig_NonExistentFile(t *testing.T) {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	if config.Version != CurrentVersion {
-		t.Errorf("Expected version %s, got %s", CurrentVersion, config.Version)
-	}
-
-	if config.Defaults.BaseDir != "../worktrees" {
-		t.Errorf("Expected default base_dir '../worktrees', got %s", config.Defaults.BaseDir)
+	if config.HasHooks() {
+		t.Error("Expected no hooks in default config")
 	}
 }
 
@@ -52,14 +48,7 @@ hooks:
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	if config.Version != "1.0" {
-		t.Errorf("Expected version '1.0', got %s", config.Version)
-	}
-
-	if config.Defaults.BaseDir != "../my-worktrees" {
-		t.Errorf("Expected base_dir '../my-worktrees', got %s", config.Defaults.BaseDir)
-	}
-
+	// version and defaults are ignored gracefully
 	if len(config.Hooks.PostCreate) != 3 {
 		t.Errorf("Expected 3 hooks, got %d", len(config.Hooks.PostCreate))
 	}
@@ -81,8 +70,7 @@ func TestLoadConfig_CopyHookDefaultsToFrom(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, ConfigFileName)
 
-	configContent := `version: "1.0"
-hooks:
+	configContent := `hooks:
   post_create:
     - type: copy
       from: ".env"
@@ -111,8 +99,7 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, ConfigFileName)
 
-	invalidContent := `version: "1.0"
-hooks:
+	invalidContent := `hooks:
   post_create:
     - type: copy
       from: ".env.example"
@@ -136,10 +123,6 @@ func TestSaveConfig(t *testing.T) {
 	tempDir := t.TempDir()
 
 	config := &Config{
-		Version: "1.0",
-		Defaults: Defaults{
-			BaseDir: "../test-worktrees",
-		},
 		Hooks: Hooks{
 			PostCreate: []Hook{
 				{
@@ -168,12 +151,8 @@ func TestSaveConfig(t *testing.T) {
 		t.Fatalf("Failed to load saved config: %v", err)
 	}
 
-	if loadedConfig.Version != config.Version {
-		t.Errorf("Expected version %s, got %s", config.Version, loadedConfig.Version)
-	}
-
-	if loadedConfig.Defaults.BaseDir != config.Defaults.BaseDir {
-		t.Errorf("Expected base_dir %s, got %s", config.Defaults.BaseDir, loadedConfig.Defaults.BaseDir)
+	if len(loadedConfig.Hooks.PostCreate) != 1 {
+		t.Errorf("Expected 1 hook, got %d", len(loadedConfig.Hooks.PostCreate))
 	}
 }
 
@@ -184,12 +163,8 @@ func TestConfigValidate(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name: "valid config",
+			name: "valid config with hooks",
 			config: &Config{
-				Version: "1.0",
-				Defaults: Defaults{
-					BaseDir: "../worktrees",
-				},
 				Hooks: Hooks{
 					PostCreate: []Hook{
 						{
@@ -203,25 +178,13 @@ func TestConfigValidate(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "empty version gets default",
-			config: &Config{
-				Defaults: Defaults{
-					BaseDir: "../worktrees",
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "empty base_dir gets default",
-			config: &Config{
-				Version: "1.0",
-			},
+			name:        "empty config",
+			config:      &Config{},
 			expectError: false,
 		},
 		{
 			name: "invalid copy hook - missing from",
 			config: &Config{
-				Version: "1.0",
 				Hooks: Hooks{
 					PostCreate: []Hook{
 						{
@@ -236,7 +199,6 @@ func TestConfigValidate(t *testing.T) {
 		{
 			name: "invalid command hook - missing command",
 			config: &Config{
-				Version: "1.0",
 				Hooks: Hooks{
 					PostCreate: []Hook{
 						{
@@ -259,16 +221,6 @@ func TestConfigValidate(t *testing.T) {
 			}
 			if !tt.expectError && err != nil {
 				t.Errorf("Expected no error but got: %v", err)
-			}
-
-			// Check defaults are set
-			if !tt.expectError {
-				if tt.config.Version == "" {
-					t.Error("Version should be set to default")
-				}
-				if tt.config.Defaults.BaseDir == "" {
-					t.Error("BaseDir should be set to default")
-				}
 			}
 		})
 	}
@@ -439,7 +391,6 @@ func TestHookApplyDefaults_CopyToDefaultsToFrom(t *testing.T) {
 
 func TestConfigApplyDefaults_CopyToDefaultsToFrom(t *testing.T) {
 	config := &Config{
-		Version: "1.0",
 		Hooks: Hooks{
 			PostCreate: []Hook{
 				{
@@ -463,7 +414,6 @@ func TestConfigApplyDefaults_CopyToDefaultsToFrom(t *testing.T) {
 
 func TestConfigValidate_CopyAbsoluteFromRequiresTo(t *testing.T) {
 	config := &Config{
-		Version: "1.0",
 		Hooks: Hooks{
 			PostCreate: []Hook{
 				{
@@ -478,59 +428,6 @@ func TestConfigValidate_CopyAbsoluteFromRequiresTo(t *testing.T) {
 
 	if err := config.Validate(); err == nil {
 		t.Fatalf("Expected error but got nil")
-	}
-}
-
-func TestResolveWorktreePath(t *testing.T) {
-	tests := []struct {
-		name         string
-		config       *Config
-		repoRoot     string
-		worktreeName string
-		expected     string
-	}{
-		{
-			name: "relative base_dir",
-			config: &Config{
-				Defaults: Defaults{
-					BaseDir: "../worktrees",
-				},
-			},
-			repoRoot:     "/home/user/project",
-			worktreeName: "feature/auth",
-			expected:     "/home/user/worktrees/feature/auth",
-		},
-		{
-			name: "absolute base_dir",
-			config: &Config{
-				Defaults: Defaults{
-					BaseDir: "/tmp/worktrees",
-				},
-			},
-			repoRoot:     "/home/user/project",
-			worktreeName: "feature/auth",
-			expected:     "/tmp/worktrees/feature/auth",
-		},
-		{
-			name: "simple worktree name",
-			config: &Config{
-				Defaults: Defaults{
-					BaseDir: "../worktrees",
-				},
-			},
-			repoRoot:     "/home/user/project",
-			worktreeName: "main",
-			expected:     "/home/user/worktrees/main",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tt.config.ResolveWorktreePath(tt.repoRoot, tt.worktreeName)
-			if result != tt.expected {
-				t.Errorf("Expected %s, got %s", tt.expected, result)
-			}
-		})
 	}
 }
 

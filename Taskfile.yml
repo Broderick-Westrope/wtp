@@ -73,7 +73,7 @@ tasks:
           echo "Formatting code..."
           module_path=$(go list -m 2>/dev/null || echo "")
           if [ -z "$module_path" ]; then
-            module_path="github.com/satococoa/wtp/v2"
+            module_path="github.com/satococoa/wtp/v3"
           fi
           echo "Using goimports local-prefixes: ${module_path}"
           GOIMPORTS_LOCAL_PREFIXES="${module_path}" go tool golangci-lint fmt ./...

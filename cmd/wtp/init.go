@@ -8,9 +8,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v2/internal/config"
-	"github.com/satococoa/wtp/v2/internal/errors"
-	"github.com/satococoa/wtp/v2/internal/git"
+	"github.com/satococoa/wtp/v3/internal/config"
+	"github.com/satococoa/wtp/v3/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/git"
 )
 
 const configFileMode = 0o600
@@ -63,47 +63,16 @@ func initCommand(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Create configuration with comments
-	configContent := `# Worktree Plus Configuration
-version: "1.0"
-
-# Default settings for worktrees
-defaults:
-  # Base directory for worktrees (relative to repository root)
-  base_dir: ../worktrees
-
-# Hooks that run after creating a worktree
-hooks:
+	configContent := `hooks:
   post_create:
-    # Example: Copy gitignored files from MAIN worktree to new worktree
-    # Note: 'from' is relative to main worktree, 'to' is relative to new worktree
     # - type: copy
-    #   from: .env        # Copy actual .env file (gitignored)
+    #   from: .env
     #   to: .env
-
-    # Example: Run a command to show all worktrees
-    - type: command
-      command: wtp list
-
-    # More examples (commented out):
-    
-    # Copy AI context files (typically gitignored):
-    # - type: copy
-    #   from: .claude     # Claude AI context
-    #   to: .claude
-    # - type: copy
-    #   from: .cursor/    # Cursor IDE settings
-    #   to: .cursor/
-
-    # Share directories with symlinks:
     # - type: symlink
-    #   from: .bin        # Shared tool cache
+    #   from: .bin
     #   to: .bin
-    
-    # Run setup commands:
     # - type: command
     #   command: npm install
-    # - type: command
-    #   command: echo "Created new worktree!"
 `
 
 	if err := ensureWritableDirectory(repo.Path()); err != nil {

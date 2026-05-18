@@ -9,32 +9,34 @@ func TestWorktreeName(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "simple path",
+			name: "branch name returned",
 			worktree: Worktree{
-				Path: "/home/user/worktrees/main",
+				Path:   "/home/user/worktrees/main",
+				Branch: "main",
 			},
 			expected: "main",
 		},
 		{
-			name: "nested path",
+			name: "feature branch returned",
+			worktree: Worktree{
+				Path:   "/home/user/worktrees/feature-auth",
+				Branch: "feature/auth",
+			},
+			expected: "feature/auth",
+		},
+		{
+			name: "empty branch falls back to directory name",
+			worktree: Worktree{
+				Path: "/home/user/worktrees/detached",
+			},
+			expected: "detached",
+		},
+		{
+			name: "empty branch with nested path falls back to directory name",
 			worktree: Worktree{
 				Path: "/home/user/worktrees/feature/auth",
 			},
 			expected: "auth",
-		},
-		{
-			name: "root path",
-			worktree: Worktree{
-				Path: "/",
-			},
-			expected: "/",
-		},
-		{
-			name: "trailing slash",
-			worktree: Worktree{
-				Path: "/home/user/worktrees/main/",
-			},
-			expected: "main",
 		},
 	}
 
@@ -100,99 +102,56 @@ func TestWorktreeString(t *testing.T) {
 
 func TestWorktree_CompletionName(t *testing.T) {
 	tests := []struct {
-		name             string
-		worktree         Worktree
-		repoName         string
-		mainWorktreePath string
-		expected         string
+		name     string
+		worktree Worktree
+		expected string
 	}{
 		{
-			name: "root worktree should show repo name with branch and root indicator",
+			name: "main worktree returns @",
 			worktree: Worktree{
 				Path:   "/Users/user/repos/giselle",
 				Branch: "fix-nodes",
 				IsMain: true,
 			},
-			repoName:         "giselle",
-			mainWorktreePath: "/Users/user/repos/giselle",
-			expected:         "giselle@fix-nodes(root worktree)",
+			expected: "@",
 		},
 		{
-			name: "root worktree with main branch should show repo name with branch and root indicator",
+			name: "main worktree with main branch returns @",
 			worktree: Worktree{
 				Path:   "/Users/user/repos/wtp",
 				Branch: "main",
 				IsMain: true,
 			},
-			repoName:         "wtp",
-			mainWorktreePath: "/Users/user/repos/wtp",
-			expected:         "wtp@main(root worktree)",
+			expected: "@",
 		},
 		{
-			name: "feature branch worktree should show branch when worktree name differs",
+			name: "feature branch worktree returns branch name",
 			worktree: Worktree{
 				Path:   "/Users/user/repos/wtp/worktrees/feature-awesome",
 				Branch: "feature/awesome",
 			},
-			repoName:         "wtp",
-			mainWorktreePath: "/Users/user/repos/wtp",
-			expected:         "feature-awesome@feature/awesome",
+			expected: "feature/awesome",
 		},
 		{
-			name: "fix branch with multiple slashes should show worktree name and branch",
-			worktree: Worktree{
-				Path:   "/Users/user/repos/wtp/worktrees/fix-123-fix-login",
-				Branch: "fix/123/fix-login",
-			},
-			repoName:         "wtp",
-			mainWorktreePath: "/Users/user/repos/wtp",
-			expected:         "fix-123-fix-login@fix/123/fix-login",
-		},
-		{
-			name: "simple branch where worktree name matches branch should show branch only",
+			name: "simple branch returns branch name",
 			worktree: Worktree{
 				Path:   "/Users/user/repos/wtp/worktrees/develop",
 				Branch: "develop",
 			},
-			repoName:         "wtp",
-			mainWorktreePath: "/Users/user/repos/wtp",
-			expected:         "develop",
+			expected: "develop",
 		},
 		{
-			name: "feature branch where worktree name matches branch should show branch only",
+			name: "empty branch returns empty string",
 			worktree: Worktree{
-				Path:   "/Users/user/repos/wtp/worktrees/feature/new-top-page",
-				Branch: "feature/new-top-page",
+				Path: "/Users/user/repos/wtp/worktrees/detached",
 			},
-			repoName:         "wtp",
-			mainWorktreePath: "/Users/user/repos/wtp",
-			expected:         "feature/new-top-page",
-		},
-		{
-			name: "worktree in worktrees directory should not be detected as root",
-			worktree: Worktree{
-				Path:   "/Users/user/repos/giselle/.worktrees/stripe-basil-update",
-				Branch: "stripe-basil-migration",
-			},
-			repoName:         "giselle",
-			mainWorktreePath: "/Users/user/repos/giselle",
-			expected:         "stripe-basil-update@stripe-basil-migration",
-		},
-		{
-			name: "worktree in .worktrees directory should not be detected as root",
-			worktree: Worktree{
-				Path:   "/Users/satoshi/dev/src/github.com/giselles-ai/giselle/.worktrees/stripe-basil-update",
-				Branch: "stripe-basil-migration",
-			},
-			repoName:         "giselle",
-			mainWorktreePath: "/Users/satoshi/dev/src/github.com/giselles-ai/giselle",
-			expected:         "stripe-basil-update@stripe-basil-migration",
+			expected: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tt.worktree.CompletionName(tt.repoName)
+			result := tt.worktree.CompletionName("anyrepo")
 			if result != tt.expected {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
@@ -218,10 +177,19 @@ func TestWorktree_IsMainWorktree(t *testing.T) {
 		{
 			name: "different worktree should return false",
 			worktree: Worktree{
-				Path: "/Users/user/repos/wtp/worktrees/feature-branch",
+				Path: "/Users/user/repos/wtp/worktrees/feature",
 			},
 			mainWorktreePath: "/Users/user/repos/wtp",
 			expected:         false,
+		},
+		{
+			name: "IsMain flag set returns true",
+			worktree: Worktree{
+				Path:   "/any/path",
+				IsMain: true,
+			},
+			mainWorktreePath: "",
+			expected:         true,
 		},
 	}
 

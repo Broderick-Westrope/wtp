@@ -3,7 +3,7 @@ package e2e
 import (
 	"testing"
 
-	"github.com/satococoa/wtp/v2/test/e2e/framework"
+	"github.com/satococoa/wtp/v3/test/e2e/framework"
 )
 
 func TestRemoteBranchHandling(t *testing.T) {
@@ -12,7 +12,8 @@ func TestRemoteBranchHandling(t *testing.T) {
 
 	t.Run("SingleRemoteBranch", func(t *testing.T) {
 		repo := env.CreateTestRepo("remote-single")
-		repo.AddRemote("origin", "https://example.com/repo.git")
+		// SetRemoteURL changes the default origin added by CreateTestRepo
+		repo.SetRemoteURL("origin", "https://github.com/example/repo.git")
 		repo.CreateRemoteBranch("origin", "remote-feature")
 
 		output, err := repo.RunWTP("add", "remote-feature")
@@ -23,8 +24,8 @@ func TestRemoteBranchHandling(t *testing.T) {
 
 	t.Run("MultipleRemotes", func(t *testing.T) {
 		repo := env.CreateTestRepo("remote-multiple")
-		repo.AddRemote("origin", "https://example.com/repo.git")
-		repo.AddRemote("upstream", "https://example.com/upstream.git")
+		repo.SetRemoteURL("origin", "https://github.com/example/repo.git")
+		repo.AddRemote("upstream", "https://github.com/upstream/repo.git")
 		repo.CreateRemoteBranch("origin", "shared-branch")
 		repo.CreateRemoteBranch("upstream", "shared-branch")
 
@@ -38,8 +39,8 @@ func TestRemoteBranchHandling(t *testing.T) {
 
 	t.Run("ExplicitRemoteTracking", func(t *testing.T) {
 		repo := env.CreateTestRepo("remote-explicit")
-		repo.AddRemote("origin", "https://example.com/repo.git")
-		repo.AddRemote("upstream", "https://example.com/upstream.git")
+		repo.SetRemoteURL("origin", "https://github.com/example/repo.git")
+		repo.AddRemote("upstream", "https://github.com/upstream/repo.git")
 		repo.CreateRemoteBranch("origin", "explicit-branch")
 		repo.CreateRemoteBranch("upstream", "explicit-branch")
 
@@ -52,7 +53,7 @@ func TestRemoteBranchHandling(t *testing.T) {
 
 	t.Run("RemoteOnlyBranch", func(t *testing.T) {
 		repo := env.CreateTestRepo("remote-only")
-		repo.AddRemote("origin", "https://example.com/repo.git")
+		// Default origin (https://github.com/test/repo.git) is already set by CreateTestRepo.
 		repo.CreateRemoteBranch("origin", "remote-only-branch")
 
 		output, err := repo.RunWTP("add", "remote-only-branch")
@@ -66,7 +67,7 @@ func TestRemoteBranchHandling(t *testing.T) {
 
 	t.Run("NonExistentRemoteBranch", func(t *testing.T) {
 		repo := env.CreateTestRepo("remote-nonexistent")
-		repo.AddRemote("origin", "https://example.com/repo.git")
+		// origin already present via CreateTestRepo default
 
 		output, err := repo.RunWTP("add", "nonexistent-remote-branch")
 		framework.AssertError(t, err)
@@ -76,7 +77,7 @@ func TestRemoteBranchHandling(t *testing.T) {
 
 	t.Run("LocalTakesPrecedence", func(t *testing.T) {
 		repo := env.CreateTestRepo("remote-precedence")
-		repo.AddRemote("origin", "https://example.com/repo.git")
+		// Default origin already set
 		repo.CreateBranch("precedence-branch")
 		repo.CreateRemoteBranch("origin", "precedence-branch")
 
@@ -91,7 +92,7 @@ func TestRemoteBranchHandling(t *testing.T) {
 
 	t.Run("RemoteBranchWithSlashes", func(t *testing.T) {
 		repo := env.CreateTestRepo("remote-slashes")
-		repo.AddRemote("origin", "https://example.com/repo.git")
+		// Default origin already set
 		repo.CreateRemoteBranch("origin", "feature/remote/nested")
 
 		output, err := repo.RunWTP("add", "feature/remote/nested")
@@ -105,8 +106,10 @@ func TestRemoteConfiguration(t *testing.T) {
 	env := framework.NewTestEnvironment(t)
 	defer env.Cleanup()
 
-	t.Run("NoRemotes", func(t *testing.T) {
-		repo := env.CreateTestRepo("no-remotes")
+	t.Run("BranchNotFoundWithOrigin", func(t *testing.T) {
+		// origin is always present (added by CreateTestRepo); test that a missing
+		// branch still produces a helpful error.
+		repo := env.CreateTestRepo("no-branch")
 
 		output, err := repo.RunWTP("add", "remote-branch")
 		framework.AssertError(t, err)
@@ -116,13 +119,13 @@ func TestRemoteConfiguration(t *testing.T) {
 	t.Run("InvalidRemoteURL", func(t *testing.T) {
 		repo := env.CreateTestRepo("invalid-remote")
 
-		// Add remote with invalid URL format
+		// Add an additional remote with a non-standard URL format.
 		_ = env.RunInDir(repo.Path(), "git", "remote", "add", "invalid", "not-a-url")
-		// Git might accept this, but it's still invalid
 
 		repo.CreateRemoteBranch("invalid", "test-branch")
 
-		// wtp should still work with the remote branch
+		// wtp should still work since a valid origin is present and the branch
+		// is visible via git's remote tracking refs.
 		output, err := repo.RunWTP("add", "test-branch")
 		framework.AssertNoError(t, err)
 		framework.AssertWorktreeCreated(t, output, "test-branch")
@@ -130,7 +133,7 @@ func TestRemoteConfiguration(t *testing.T) {
 
 	t.Run("CaseSensitivity", func(t *testing.T) {
 		repo := env.CreateTestRepo("case-sensitive")
-		repo.AddRemote("origin", "https://example.com/repo.git")
+		// Default origin already present; just create the remote branch.
 		repo.CreateRemoteBranch("origin", "Feature/CaseSensitive")
 
 		// Try with different case
@@ -151,7 +154,7 @@ func TestSimplifiedInterfaceBehavior(t *testing.T) {
 
 	t.Run("NewBranchFromRemote", func(t *testing.T) {
 		repo := env.CreateTestRepo("new-from-remote")
-		repo.AddRemote("origin", "https://example.com/repo.git")
+		// Default origin already present from CreateTestRepo.
 		repo.CreateRemoteBranch("origin", "remote-feature")
 
 		// Create new branch from remote using simplified interface
@@ -163,6 +166,7 @@ func TestSimplifiedInterfaceBehavior(t *testing.T) {
 
 	t.Run("NewBranchFromCommit", func(t *testing.T) {
 		repo := env.CreateTestRepo("new-from-commit")
+		// Default origin already present from CreateTestRepo.
 		repo.CreateBranch("source-branch")
 
 		// Create new branch from specific commit

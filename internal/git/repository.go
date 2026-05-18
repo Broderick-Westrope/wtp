@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/satococoa/wtp/v2/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/errors"
 )
 
 // Repository represents a git repository and offers helper methods for worktree operations.
@@ -123,6 +123,18 @@ func (r *Repository) RemoveWorktree(path string, force bool) error {
 		return fmt.Errorf("failed to remove worktree: %w", err)
 	}
 	return nil
+}
+
+// GetRemoteURL returns the URL for the given remote name.
+// It runs `git remote get-url <remoteName>` and returns the trimmed output.
+func (r *Repository) GetRemoteURL(remoteName string) (string, error) {
+	cmd := exec.Command("git", "remote", "get-url", remoteName)
+	cmd.Dir = r.path
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get URL for remote %q: %w", remoteName, err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 // ExecuteGitCommand executes a git command in the repository directory

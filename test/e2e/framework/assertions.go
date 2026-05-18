@@ -146,6 +146,18 @@ func AssertWorktreeNotExists(t *testing.T, repo *TestRepo, path string) {
 	}
 }
 
+// AssertWorktreeArchived verifies that the output confirms a worktree was archived.
+func AssertWorktreeArchived(t *testing.T, output, branch string) {
+	t.Helper()
+	assert.Contains(t, output, "Archived "+branch, "Expected output to confirm '%s' was archived, got: %s", branch, output)
+}
+
+// AssertWorktreeNotArchived verifies that the output does not indicate archival.
+func AssertWorktreeNotArchived(t *testing.T, output, branch string) {
+	t.Helper()
+	assert.NotContains(t, output, "Archived "+branch, "Expected output to NOT show '%s' archived, got: %s", branch, output)
+}
+
 // AssertEqual compares two values for equality.
 func AssertEqual(t *testing.T, expected, actual any) {
 	t.Helper()

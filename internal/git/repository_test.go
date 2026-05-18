@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/satococoa/wtp/v2/internal/testutil"
+	"github.com/satococoa/wtp/v3/internal/testutil"
 )
 
 func setupTestRepo(t *testing.T) string {
@@ -383,4 +383,48 @@ func getHeadCommit(t *testing.T, dir string) string {
 		t.Fatalf("Failed to get HEAD commit: %v", err)
 	}
 	return strings.TrimSpace(string(output))
+}
+
+func TestGetRemoteURL(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+
+	t.Run("returns URL for configured remote", func(t *testing.T) {
+		originURL := "https://github.com/testowner/testrepo.git"
+		runGit("remote", "add", "origin", originURL)
+		defer runGit("remote", "remove", "origin")
+
+		repo, err := NewRepository(repoDir)
+		if err != nil {
+			t.Fatalf("NewRepository: %v", err)
+		}
+
+		got, err := repo.GetRemoteURL("origin")
+		if err != nil {
+			t.Fatalf("GetRemoteURL: %v", err)
+		}
+		if got != originURL {
+			t.Errorf("expected %q, got %q", originURL, got)
+		}
+	})
+
+	t.Run("returns error for missing remote", func(t *testing.T) {
+		repo, err := NewRepository(repoDir)
+		if err != nil {
+			t.Fatalf("NewRepository: %v", err)
+		}
+
+		_, err = repo.GetRemoteURL("no-such-remote")
+		if err == nil {
+			t.Error("expected error for missing remote, got nil")
+		}
+	})
 }

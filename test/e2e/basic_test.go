@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/satococoa/wtp/v2/test/e2e/framework"
+	"github.com/satococoa/wtp/v3/test/e2e/framework"
 )
 
 func TestBasicCommands(t *testing.T) {
@@ -21,7 +21,7 @@ func TestBasicCommands(t *testing.T) {
 		output, err := env.RunWTP("--help")
 		framework.AssertNoError(t, err)
 
-		expectedCommands := []string{"add", "remove", "list", "init", "cd"}
+		expectedCommands := []string{"add", "remove", "list", "init", "cd", "archive", "unarchive", "doctor"}
 		framework.AssertMultipleStringsInOutput(t, output, expectedCommands)
 
 		framework.AssertOutputContains(t, output, "USAGE:")
@@ -30,7 +30,7 @@ func TestBasicCommands(t *testing.T) {
 	})
 
 	t.Run("HelpForCommand", func(t *testing.T) {
-		commands := []string{"add", "remove", "list", "init", "cd"}
+		commands := []string{"add", "remove", "list", "init", "cd", "archive", "unarchive", "doctor"}
 
 		for _, cmd := range commands {
 			output, err := env.RunWTP(cmd, "--help")
@@ -53,9 +53,10 @@ func TestInitCommand(t *testing.T) {
 		framework.AssertOutputContains(t, output, "Configuration file created")
 		framework.AssertFileExists(t, repo, ".wtp.yml")
 
+		// In v3 the config is hooks-only; version and base_dir are no longer generated.
 		content := repo.ReadFile(".wtp.yml")
-		framework.AssertTrue(t, strings.Contains(content, "version:"), "Config should contain version")
-		framework.AssertTrue(t, strings.Contains(content, "base_dir:"), "Config should contain base_dir")
+		framework.AssertTrue(t, strings.Contains(content, "hooks:"), "Config should contain hooks section")
+		framework.AssertTrue(t, strings.Contains(content, "post_create:"), "Config should contain post_create hooks template")
 	})
 
 	t.Run("ConfigAlreadyExists", func(t *testing.T) {

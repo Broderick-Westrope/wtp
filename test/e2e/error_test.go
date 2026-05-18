@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/satococoa/wtp/v2/test/e2e/framework"
+	"github.com/satococoa/wtp/v3/test/e2e/framework"
 )
 
 func TestErrorMessages(t *testing.T) {
@@ -91,8 +91,9 @@ func TestErrorMessages(t *testing.T) {
 
 	t.Run("MultipleRemotesError", func(t *testing.T) {
 		repo := env.CreateTestRepo("error-multiple-remotes")
-		repo.AddRemote("origin", "https://example.com/repo.git")
-		repo.AddRemote("upstream", "https://example.com/upstream.git")
+		// Default origin is already set by CreateTestRepo; just add a second remote.
+		repo.SetRemoteURL("origin", "https://github.com/example/repo.git")
+		repo.AddRemote("upstream", "https://github.com/upstream/repo.git")
 		repo.CreateRemoteBranch("origin", "ambiguous-branch")
 		repo.CreateRemoteBranch("upstream", "ambiguous-branch")
 

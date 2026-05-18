@@ -12,19 +12,17 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v2/internal/command"
-	"github.com/satococoa/wtp/v2/internal/config"
-	"github.com/satococoa/wtp/v2/internal/errors"
-	"github.com/satococoa/wtp/v2/internal/git"
+	"github.com/satococoa/wtp/v3/internal/cache"
+	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/satococoa/wtp/v3/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/git"
+	"github.com/satococoa/wtp/v3/internal/remote"
+	"github.com/satococoa/wtp/v3/internal/state"
+	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
 // Variable to allow mocking in tests
 var removeGetwd = os.Getwd
-
-// isWorktreeManaged determines if a worktree is managed by wtp
-func isWorktreeManaged(worktreePath string, cfg *config.Config, mainRepoPath string, isMain bool) bool {
-	return isWorktreeManagedCommon(worktreePath, cfg, mainRepoPath, isMain)
-}
 
 // NewRemoveCommand creates the remove command definition
 func NewRemoveCommand() *cli.Command {
@@ -33,7 +31,7 @@ func NewRemoveCommand() *cli.Command {
 		Aliases:   []string{"rm"},
 		Usage:     "Remove a worktree",
 		UsageText: "wtp remove <worktree-name>",
-		Description: "Removes the worktree with the specified directory name.\n" +
+		Description: "Removes the worktree with the specified branch name.\n" +
 			"By default, also deletes the associated branch.\n\n" +
 			"Examples:\n" +
 			"  wtp remove feature-old                  # Remove worktree and branch\n" +
@@ -146,6 +144,11 @@ func removeCommandWithCommandExecutor(
 		}
 		return errors.WorktreeRemovalFailed(targetWorktree.Path, result.Results[0].Error)
 	}
+	// Best-effort: clean up state and cache entries for the removed worktree.
+	cleanupWorktreeStateAndCache(cwd, targetWorktree.Branch)
+	// Best-effort: remove empty centralized storage directories.
+	cleanupCentralizedWorktreeDir(targetWorktree.Path)
+
 	if _, err := fmt.Fprintf(w, "Removed worktree '%s' at %s\n", worktreeName, targetWorktree.Path); err != nil {
 		return err
 	}
@@ -210,95 +213,93 @@ func removeBranchWithCommandExecutor(
 	return err
 }
 
-func findTargetWorktreeFromList(worktrees []git.Worktree, worktreeName string) (*git.Worktree, error) {
-	var targetWorktree *git.Worktree
-	var availableWorktrees []string
-
-	// Find main worktree path for consistent naming
-	mainWorktreePath := ""
-	for _, wt := range worktrees {
-		if wt.IsMain {
-			mainWorktreePath = wt.Path
-			break
-		}
+// cleanupCentralizedWorktreeDir removes the leaf worktree directory and any empty parent
+// directories up to WorktreeStorageRoot() after a successful worktree removal.
+// Only acts on paths inside centralized storage; silently no-ops otherwise.
+func cleanupCentralizedWorktreeDir(worktreePath string) {
+	storageRoot := xdg.WorktreeStorageRoot()
+	if storageRoot == "" {
+		return
 	}
 
-	// Load config for consistent worktree naming
-	cfg, err := config.LoadConfig(mainWorktreePath)
+	absPath, err := filepath.Abs(worktreePath)
 	if err != nil {
-		// If config can't be loaded, use default config
-		cfg = &config.Config{
-			Defaults: config.Defaults{
-				BaseDir: config.DefaultBaseDir,
-			},
-		}
+		return
 	}
 
-	for _, wt := range worktrees {
-		// Skip main worktree - it cannot be removed
-		if wt.IsMain {
-			continue
-		}
+	absRoot, err := filepath.Abs(storageRoot)
+	if err != nil {
+		return
+	}
 
-		// Skip unmanaged worktrees - they cannot be removed by wtp
-		if !isWorktreeManaged(wt.Path, cfg, mainWorktreePath, wt.IsMain) {
-			continue
-		}
+	// Only clean up strict subdirectories of the storage root.
+	prefix := absRoot + string(os.PathSeparator)
+	if !strings.HasPrefix(absPath, prefix) {
+		return
+	}
 
-		// Priority 1: Match by branch name (for prefixes like feature/awesome)
-		if wt.Branch == worktreeName {
-			targetWorktree = &wt
-		}
-
-		// Priority 2: Match by directory name (legacy behavior)
-		wtName := filepath.Base(wt.Path)
-		if wtName == worktreeName {
-			targetWorktree = &wt
-		}
-
-		// Priority 3: Match by worktree name (relative to base_dir)
-		worktreeDisplayName := getWorktreeNameFromPath(wt.Path, cfg, mainWorktreePath, wt.IsMain)
-		if worktreeDisplayName == worktreeName {
-			targetWorktree = &wt
-		}
-
-		// Build available worktrees list using consistent naming (excluding main worktree and unmanaged)
-		availableWorktrees = append(availableWorktrees, worktreeDisplayName)
-
-		// Exit early if we found a match
-		if targetWorktree != nil {
+	// Walk upward from leaf, removing empty dirs until we reach storageRoot.
+	dir := absPath
+	for dir != absRoot && dir != filepath.Dir(dir) {
+		if err := os.Remove(dir); err != nil {
+			// Non-empty dir or other error — stop climbing.
 			break
 		}
+		dir = filepath.Dir(dir)
 	}
-
-	if targetWorktree == nil {
-		return nil, errors.WorktreeNotFound(worktreeName, availableWorktrees)
-	}
-	return targetWorktree, nil
 }
 
-// getWorktreeNameFromPath calculates the worktree name from its path
-// For main worktree, returns "@"
-// For other worktrees, returns relative path from base_dir
-func getWorktreeNameFromPath(worktreePath string, cfg *config.Config, mainRepoPath string, isMain bool) string {
-	if isMain {
-		return "@"
+// cleanupWorktreeStateAndCache removes state and cache entries for the given branch after a
+// successful worktree removal. All errors are silently ignored (best-effort).
+func cleanupWorktreeStateAndCache(cwd, branch string) {
+	if branch == "" {
+		return
 	}
 
-	// Get base_dir path
-	baseDir := cfg.Defaults.BaseDir
-	if !filepath.IsAbs(baseDir) {
-		baseDir = filepath.Join(mainRepoPath, baseDir)
-	}
-
-	// Calculate relative path from base_dir
-	relPath, err := filepath.Rel(baseDir, worktreePath)
+	repo, err := git.NewRepository(cwd)
 	if err != nil {
-		// Fallback to directory name
-		return filepath.Base(worktreePath)
+		return
 	}
 
-	return relPath
+	remoteURL, err := repo.GetRemoteURL("origin")
+	if err != nil {
+		return
+	}
+
+	repoID, err := remote.Parse(remoteURL)
+	if err != nil {
+		return
+	}
+
+	key := repoID.StateKey(branch)
+
+	_ = state.NewStore().WithLock(func(st state.State) (state.State, error) {
+		delete(st.Worktrees, key)
+		return st, nil
+	})
+
+	_ = cache.NewStore().Delete(key)
+}
+
+// findTargetWorktreeFromList finds a non-main worktree by branch name.
+// All non-main worktrees participate — there is no managed/unmanaged filter.
+func findTargetWorktreeFromList(worktrees []git.Worktree, worktreeName string) (*git.Worktree, error) {
+	var availableWorktrees []string
+
+	for i, wt := range worktrees {
+		// Skip main worktree — it cannot be removed via wtp remove
+		if wt.IsMain {
+			continue
+		}
+
+		availableWorktrees = append(availableWorktrees, wt.Branch)
+
+		if wt.Branch == worktreeName {
+			return &worktrees[i], nil
+		}
+	}
+
+	return nil, errors.WorktreeNotFound(worktreeName, availableWorktrees)
 }
 
 // getWorktreesForRemove gets worktrees for remove command and writes them to writer (testable)
@@ -315,31 +316,17 @@ func getWorktreesForRemove(w io.Writer) error {
 		return err
 	}
 
-	// Get main worktree path
-	mainRepoPath, err := repo.GetMainWorktreePath()
-	if err != nil {
-		return err
-	}
-
-	// Load config
-	cfg, err := config.LoadConfig(mainRepoPath)
-	if err != nil {
-		return err
-	}
-
 	// Get all worktrees
 	worktrees, err := repo.GetWorktrees()
 	if err != nil {
 		return err
 	}
 
-	// Print worktrees for remove command (no main, no markers, managed only)
+	// Print branch names for all non-main worktrees
 	for i := range worktrees {
 		wt := &worktrees[i]
-		if !wt.IsMain && isWorktreeManaged(wt.Path, cfg, mainRepoPath, wt.IsMain) {
-			// Calculate worktree name as relative path from base_dir
-			name := getWorktreeNameFromPath(wt.Path, cfg, mainRepoPath, wt.IsMain)
-			if _, err := fmt.Fprintln(w, name); err != nil {
+		if !wt.IsMain && wt.Branch != "" {
+			if _, err := fmt.Fprintln(w, wt.Branch); err != nil {
 				return err
 			}
 		}
