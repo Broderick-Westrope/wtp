@@ -304,9 +304,15 @@ func fetchPRCIForBranch(
 		return nil
 	}
 
-	// Fetch fresh data concurrently — network calls outside the lock
+	// Fetch fresh data — network calls outside the lock.
+	// CI checks require a PR, so skip the CI call when there's no PR to avoid
+	// a wasted round-trip that always returns "no pull requests found".
 	pr, prErr := listGetPRForBranch(ctx, wt.Branch)
-	ci, ciErr := listGetCIStatus(ctx, wt.Branch)
+	var ci *github.CIStatus
+	var ciErr error
+	if pr != nil {
+		ci, ciErr = listGetCIStatus(ctx, wt.Branch)
+	}
 	if prErr != nil || ciErr != nil {
 		shared.errorCount.Add(1) // count branches (not individual calls) that had fetch errors
 	}
