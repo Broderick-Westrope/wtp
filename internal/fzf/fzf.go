@@ -66,7 +66,8 @@ func (*ExecFinder) Find(items []string, query string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			// fzf exit codes: 1 = no match, 2 = error, 130 = interrupted (Ctrl-C/Esc)
+			// fzf exit codes: 1 = no match, 130 = Ctrl-C/Esc; treat both as user cancellation.
+			// Exit code 2 = fzf error, falls through to the default error return.
 			switch exitErr.ExitCode() {
 			case 1, fzfExitInterrupted:
 				return "", ErrCanceled
