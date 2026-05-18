@@ -196,9 +196,10 @@ func TestIsV2WorktreePath(t *testing.T) {
 			expected: true,
 		},
 		{
+			// relPath starts with ".." not "worktrees", so NOT flagged as v2
 			absPath:  "/home/user/worktrees/feature",
 			relPath:  "../worktrees/feature",
-			expected: true,
+			expected: false,
 		},
 		{
 			// Centralized wtp storage path — should NOT be flagged

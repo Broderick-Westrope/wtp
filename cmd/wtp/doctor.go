@@ -140,13 +140,11 @@ func isV2WorktreePath(absPath, relPath string) bool {
 		return false
 	}
 
-	for _, p := range []string{absPath, relPath} {
-		parts := strings.Split(filepath.ToSlash(p), "/")
-		for _, part := range parts {
-			if part == ".worktrees" || part == "worktrees" {
-				return true
-			}
-		}
+	// Only check the relative path's first segment — v2 stored worktrees
+	// directly under <repo>/.worktrees/ or <repo>/worktrees/.
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	if len(parts) > 0 && (parts[0] == ".worktrees" || parts[0] == "worktrees") {
+		return true
 	}
 	return false
 }
