@@ -1570,8 +1570,8 @@ func TestListCommand_WithGHColumns(t *testing.T) {
 	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
 
 	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ context.Context, _ string) (*github.CIStatus, error) {
-		if branch := "feature/auth"; branch == "feature/auth" {
+	listGetCIStatus = func(_ context.Context, branch string) (*github.CIStatus, error) {
+		if branch == "feature/auth" {
 			return &github.CIStatus{State: "passing", Total: 3, Passing: 3}, nil
 		}
 		return nil, nil
