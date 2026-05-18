@@ -71,10 +71,9 @@ func execCommandWithCommandExecutor(cmd *cli.Command, w io.Writer, executor comm
 	}
 
 	worktrees := parseWorktreesFromOutput(gitResult.Output)
-	mainWorktreePath := findMainWorktreePath(worktrees)
-	targetPath := resolveWorktreePathByName(worktreeName, worktrees, mainWorktreePath)
-	if targetPath == "" {
-		return errors.WorktreeNotFound(worktreeName, availableManagedWorktreeNames(worktrees, mainWorktreePath))
+	targetPath, err := resolveWorktreePathByName(worktreeName, worktrees)
+	if err != nil {
+		return err
 	}
 
 	execResult, err := executor.Execute([]command.Command{{

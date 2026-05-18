@@ -13,7 +13,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/satococoa/wtp/v2/internal/command"
-	"github.com/satococoa/wtp/v2/internal/config"
 	"github.com/satococoa/wtp/v2/internal/errors"
 	"github.com/satococoa/wtp/v2/internal/git"
 )
@@ -21,10 +20,7 @@ import (
 // Variable to allow mocking in tests
 var removeGetwd = os.Getwd
 
-// isWorktreeManaged determines if a worktree is managed by wtp
-func isWorktreeManaged(worktreePath string, cfg *config.Config, mainRepoPath string, isMain bool) bool {
-	return isWorktreeManagedCommon(worktreePath, cfg, mainRepoPath, isMain)
-}
+
 
 // NewRemoveCommand creates the remove command definition
 func NewRemoveCommand() *cli.Command {
@@ -210,95 +206,25 @@ func removeBranchWithCommandExecutor(
 	return err
 }
 
+// findTargetWorktreeFromList finds a non-main worktree by branch name.
+// All non-main worktrees participate — there is no managed/unmanaged filter.
 func findTargetWorktreeFromList(worktrees []git.Worktree, worktreeName string) (*git.Worktree, error) {
-	var targetWorktree *git.Worktree
 	var availableWorktrees []string
 
-	// Find main worktree path for consistent naming
-	mainWorktreePath := ""
-	for _, wt := range worktrees {
-		if wt.IsMain {
-			mainWorktreePath = wt.Path
-			break
-		}
-	}
-
-	// Load config for consistent worktree naming
-	cfg, err := config.LoadConfig(mainWorktreePath)
-	if err != nil {
-		// If config can't be loaded, use default config
-		cfg = &config.Config{
-			Defaults: config.Defaults{
-				BaseDir: config.DefaultBaseDir,
-			},
-		}
-	}
-
-	for _, wt := range worktrees {
-		// Skip main worktree - it cannot be removed
+	for i, wt := range worktrees {
+		// Skip main worktree — it cannot be removed via wtp remove
 		if wt.IsMain {
 			continue
 		}
 
-		// Skip unmanaged worktrees - they cannot be removed by wtp
-		if !isWorktreeManaged(wt.Path, cfg, mainWorktreePath, wt.IsMain) {
-			continue
-		}
+		availableWorktrees = append(availableWorktrees, wt.Branch)
 
-		// Priority 1: Match by branch name (for prefixes like feature/awesome)
 		if wt.Branch == worktreeName {
-			targetWorktree = &wt
-		}
-
-		// Priority 2: Match by directory name (legacy behavior)
-		wtName := filepath.Base(wt.Path)
-		if wtName == worktreeName {
-			targetWorktree = &wt
-		}
-
-		// Priority 3: Match by worktree name (relative to base_dir)
-		worktreeDisplayName := getWorktreeNameFromPath(wt.Path, cfg, mainWorktreePath, wt.IsMain)
-		if worktreeDisplayName == worktreeName {
-			targetWorktree = &wt
-		}
-
-		// Build available worktrees list using consistent naming (excluding main worktree and unmanaged)
-		availableWorktrees = append(availableWorktrees, worktreeDisplayName)
-
-		// Exit early if we found a match
-		if targetWorktree != nil {
-			break
+			return &worktrees[i], nil
 		}
 	}
 
-	if targetWorktree == nil {
-		return nil, errors.WorktreeNotFound(worktreeName, availableWorktrees)
-	}
-	return targetWorktree, nil
-}
-
-// getWorktreeNameFromPath calculates the worktree name from its path
-// For main worktree, returns "@"
-// For other worktrees, returns relative path from base_dir
-func getWorktreeNameFromPath(worktreePath string, cfg *config.Config, mainRepoPath string, isMain bool) string {
-	if isMain {
-		return "@"
-	}
-
-	// Get base_dir path
-	baseDir := cfg.Defaults.BaseDir
-	if !filepath.IsAbs(baseDir) {
-		baseDir = filepath.Join(mainRepoPath, baseDir)
-	}
-
-	// Calculate relative path from base_dir
-	relPath, err := filepath.Rel(baseDir, worktreePath)
-	if err != nil {
-		// Fallback to directory name
-		return filepath.Base(worktreePath)
-	}
-
-	return relPath
+	return nil, errors.WorktreeNotFound(worktreeName, availableWorktrees)
 }
 
 // getWorktreesForRemove gets worktrees for remove command and writes them to writer (testable)
@@ -315,31 +241,17 @@ func getWorktreesForRemove(w io.Writer) error {
 		return err
 	}
 
-	// Get main worktree path
-	mainRepoPath, err := repo.GetMainWorktreePath()
-	if err != nil {
-		return err
-	}
-
-	// Load config
-	cfg, err := config.LoadConfig(mainRepoPath)
-	if err != nil {
-		return err
-	}
-
 	// Get all worktrees
 	worktrees, err := repo.GetWorktrees()
 	if err != nil {
 		return err
 	}
 
-	// Print worktrees for remove command (no main, no markers, managed only)
+	// Print branch names for all non-main worktrees
 	for i := range worktrees {
 		wt := &worktrees[i]
-		if !wt.IsMain && isWorktreeManaged(wt.Path, cfg, mainRepoPath, wt.IsMain) {
-			// Calculate worktree name as relative path from base_dir
-			name := getWorktreeNameFromPath(wt.Path, cfg, mainRepoPath, wt.IsMain)
-			if _, err := fmt.Fprintln(w, name); err != nil {
+		if !wt.IsMain && wt.Branch != "" {
+			if _, err := fmt.Fprintln(w, wt.Branch); err != nil {
 				return err
 			}
 		}

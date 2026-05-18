@@ -7,13 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v3"
 
 	"github.com/satococoa/wtp/v2/internal/command"
-	"github.com/satococoa/wtp/v2/internal/config"
 	"github.com/satococoa/wtp/v2/internal/errors"
 	"github.com/satococoa/wtp/v2/internal/git"
 )
@@ -88,15 +86,10 @@ func cdCommandWithCommandExecutor(
 	// Parse worktrees from command output
 	worktrees := parseWorktreesFromOutput(result.Results[0].Output)
 
-	// Find the main worktree path
-	mainWorktreePath := findMainWorktreePath(worktrees)
-
-	// Find the worktree using multiple resolution strategies
-	targetPath := resolveWorktreePathByName(worktreeName, worktrees, mainWorktreePath)
-
-	if targetPath == "" {
-		availableWorktrees := availableManagedWorktreeNames(worktrees, mainWorktreePath)
-		return errors.WorktreeNotFound(worktreeName, availableWorktrees)
+	// Find the worktree using branch-name resolution
+	targetPath, err := resolveWorktreePathByName(worktreeName, worktrees)
+	if err != nil {
+		return err
 	}
 
 	// Output the path for the shell function to cd to
@@ -105,30 +98,6 @@ func cdCommandWithCommandExecutor(
 	}
 
 	return nil
-}
-
-// getWorktreeNameFromPathCd calculates the worktree name from its path (cd version)
-// For main worktree, returns "@"
-// For other worktrees, returns relative path from base_dir
-func getWorktreeNameFromPathCd(worktreePath string, cfg *config.Config, mainRepoPath string, isMain bool) string {
-	if isMain {
-		return "@"
-	}
-
-	// Get base_dir path
-	baseDir := cfg.Defaults.BaseDir
-	if !filepath.IsAbs(baseDir) {
-		baseDir = filepath.Join(mainRepoPath, baseDir)
-	}
-
-	// Calculate relative path from base_dir
-	relPath, err := filepath.Rel(baseDir, worktreePath)
-	if err != nil {
-		// Fallback to directory name
-		return filepath.Base(worktreePath)
-	}
-
-	return relPath
 }
 
 // getWorktreesForCd gets worktrees for cd command with current position markers and writes them to writer (testable)
@@ -145,18 +114,6 @@ func getWorktreesForCd(w io.Writer) error {
 		return err
 	}
 
-	// Get main worktree path
-	mainRepoPath, err := repo.GetMainWorktreePath()
-	if err != nil {
-		return err
-	}
-
-	// Load config
-	cfg, err := config.LoadConfig(mainRepoPath)
-	if err != nil {
-		return err
-	}
-
 	// Get all worktrees
 	worktrees, err := repo.GetWorktrees()
 	if err != nil {
@@ -167,7 +124,7 @@ func getWorktreesForCd(w io.Writer) error {
 		return err
 	}
 
-	return writeManagedWorktreesForCd(w, worktrees, cfg, mainRepoPath, cwd)
+	return writeWorktreesForCd(w, worktrees, cwd)
 }
 
 func writeMainWorktreeForCd(w io.Writer, worktrees []git.Worktree, cwd string) error {
@@ -190,25 +147,21 @@ func writeMainWorktreeForCd(w io.Writer, worktrees []git.Worktree, cwd string) e
 	return nil
 }
 
-func writeManagedWorktreesForCd(
-	w io.Writer,
-	worktrees []git.Worktree,
-	cfg *config.Config,
-	mainRepoPath string,
-	cwd string,
-) error {
+// writeWorktreesForCd writes all non-main worktrees as branch names with an optional
+// current-position marker (*).
+func writeWorktreesForCd(w io.Writer, worktrees []git.Worktree, cwd string) error {
 	for i := range worktrees {
 		wt := &worktrees[i]
-		if !wt.IsMain && isWorktreeManagedCommon(wt.Path, cfg, mainRepoPath, wt.IsMain) {
-			name := getWorktreeNameFromPathCd(wt.Path, cfg, mainRepoPath, wt.IsMain)
-			if wt.Path == cwd {
-				if _, err := fmt.Fprintf(w, "%s*\n", name); err != nil {
-					return err
-				}
-			} else {
-				if _, err := fmt.Fprintln(w, name); err != nil {
-					return err
-				}
+		if wt.IsMain || wt.Branch == "" {
+			continue
+		}
+		if wt.Path == cwd {
+			if _, err := fmt.Fprintf(w, "%s*\n", wt.Branch); err != nil {
+				return err
+			}
+		} else {
+			if _, err := fmt.Fprintln(w, wt.Branch); err != nil {
+				return err
 			}
 		}
 	}

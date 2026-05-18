@@ -45,10 +45,9 @@ branch refs/heads/feature/auth
 			shouldSucceed: true,
 		},
 		{
-			name:          "feature worktree by directory name",
+			name:          "directory name alone does not match (branch-name resolution only)",
 			worktreeName:  "auth",
-			expectedPath:  "/Users/dev/project/worktrees/feature/auth",
-			shouldSucceed: true, // Directory-based resolution works as expected
+			shouldSucceed: false, // "auth" is not a branch name; branch is "feature/auth"
 		},
 		{
 			name:          "nonexistent worktree",
@@ -60,18 +59,18 @@ branch refs/heads/feature/auth
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			worktrees := parseWorktreesFromOutput(worktreeList)
-			mainPath := findMainWorktreePath(worktrees)
 
-			resolvedPath := resolveWorktreePathByName(tt.worktreeName, worktrees, mainPath)
+			resolvedPath, err := resolveWorktreePathByName(tt.worktreeName, worktrees)
 
 			if tt.shouldSucceed {
+				require.NoError(t, err)
 				assert.Equal(t, tt.expectedPath, resolvedPath,
 					"cd command must output correct absolute path")
 				assert.True(t, filepath.IsAbs(resolvedPath),
 					"cd command must always output absolute paths")
 			} else {
-				assert.Empty(t, resolvedPath,
-					"cd command should return empty string for nonexistent worktrees")
+				assert.Error(t, err,
+					"cd command should return error for nonexistent worktrees")
 			}
 		})
 	}
@@ -113,9 +112,9 @@ func TestCdCommand_NoEnvironmentVariableDependency(t *testing.T) {
 			// The core resolution function should work regardless of environment
 			worktreeList := "worktree /test/main\nHEAD abc\nbranch refs/heads/main\n\n"
 			worktrees := parseWorktreesFromOutput(worktreeList)
-			mainPath := findMainWorktreePath(worktrees)
 
-			resolvedPath := resolveWorktreePathByName("@", worktrees, mainPath)
+			resolvedPath, err := resolveWorktreePathByName("@", worktrees)
+			require.NoError(t, err)
 			assert.Equal(t, "/test/main", resolvedPath,
 				"Path resolution must not depend on environment variables")
 		})
@@ -157,14 +156,14 @@ func TestCdCommand_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			worktrees := parseWorktreesFromOutput(tt.worktreeList)
-			mainPath := findMainWorktreePath(worktrees)
 
-			result := resolveWorktreePathByName(tt.worktreeName, worktrees, mainPath)
+			result, err := resolveWorktreePathByName(tt.worktreeName, worktrees)
 
 			if tt.shouldFind {
+				require.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
 			} else {
-				assert.Empty(t, result)
+				assert.Error(t, err)
 			}
 		})
 	}
@@ -177,12 +176,6 @@ func TestCdCommand_CoreBehavior(t *testing.T) {
 	assert.Equal(t, "Output absolute path to worktree", cmd.Usage)
 	assert.NotNil(t, cmd.ShellComplete)
 	// The rest is implementation detail - what matters is that it works
-}
-
-// ===== Worktree Completion Tests =====
-
-func TestGetWorktreeNameFromPathCd(t *testing.T) {
-	RunNameFromPathTests(t, "cd", getWorktreeNameFromPathCd)
 }
 
 func TestGetWorktreesForCd(t *testing.T) {

@@ -136,7 +136,7 @@ func TestListCommand_CommandConstruction(t *testing.T) {
 			cmd := &cli.Command{}
 
 			cfg := &config.Config{
-				Defaults: config.Defaults{BaseDir: "../worktrees"},
+				
 			}
 			err := listCommandWithCommandExecutor(
 				cmd,
@@ -213,7 +213,7 @@ func TestListCommand_Output(t *testing.T) {
 			cmd := &cli.Command{}
 
 			cfg := &config.Config{
-				Defaults: config.Defaults{BaseDir: "../worktrees"},
+				
 			}
 			err := listCommandWithCommandExecutor(
 				cmd,
@@ -266,7 +266,7 @@ func TestListCommand_ExecutionError(t *testing.T) {
 	cmd := &cli.Command{}
 
 	cfg := &config.Config{
-		Defaults: config.Defaults{BaseDir: "../worktrees"},
+		
 	}
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -296,7 +296,7 @@ func TestListCommand_NoWorktrees(t *testing.T) {
 	cmd := &cli.Command{}
 
 	cfg := &config.Config{
-		Defaults: config.Defaults{BaseDir: "../worktrees"},
+		
 	}
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -365,7 +365,7 @@ func TestListCommand_InternationalCharacters(t *testing.T) {
 			cmd := &cli.Command{}
 
 			cfg := &config.Config{
-				Defaults: config.Defaults{BaseDir: "../worktrees"},
+				
 			}
 			err := listCommandWithCommandExecutor(
 				cmd,
@@ -441,7 +441,7 @@ func TestListCommand_LongPaths(t *testing.T) {
 			cmd := &cli.Command{}
 
 			cfg := &config.Config{
-				Defaults: config.Defaults{BaseDir: "../worktrees"},
+				
 			}
 			err := listCommandWithCommandExecutor(
 				cmd,
@@ -499,7 +499,7 @@ branch refs/heads/feature/test
 	cmd := &cli.Command{}
 
 	cfg := &config.Config{
-		Defaults: config.Defaults{BaseDir: "../worktrees"},
+		
 	}
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -538,7 +538,7 @@ func TestListCommand_HeaderFormatting(t *testing.T) {
 	cmd := &cli.Command{}
 
 	cfg := &config.Config{
-		Defaults: config.Defaults{BaseDir: "../worktrees"},
+		
 	}
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -649,7 +649,7 @@ branch refs/heads/feature/awesome
 			cmd := &cli.Command{}
 
 			cfg := &config.Config{
-				Defaults: config.Defaults{BaseDir: "../worktrees"},
+				
 			}
 			err := listCommandWithCommandExecutor(
 				cmd,
@@ -791,16 +791,12 @@ branch refs/heads/hoge
 				mainRepoPath = strings.TrimPrefix(lines[0], "worktree ")
 			}
 
-			// Special handling for the base_dir test case
-			baseDir := "../worktrees"
+			// Special handling for the base_dir test case (TODO: Phase 3 will rewrite list.go)
 			if tt.name == "paths relative to main worktree when in subdirectory" {
-				baseDir = ".worktrees"
 				mainRepoPath = "/Users/satoshi/dev/src/github.com/satococoa/giselle"
 			}
 
-			cfg := &config.Config{
-				Defaults: config.Defaults{BaseDir: baseDir},
-			}
+			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				cmd,
 				&buf,
@@ -891,7 +887,7 @@ branch refs/heads/feature/long-branch-name-that-might-also-be-truncated
 			cmd := &cli.Command{}
 
 			cfg := &config.Config{
-				Defaults: config.Defaults{BaseDir: "../worktrees"},
+				
 			}
 			err := listCommandWithCommandExecutor(
 				cmd,
@@ -948,7 +944,7 @@ branch refs/heads/feature/long
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{Defaults: config.Defaults{BaseDir: ".worktrees"}}
+	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -986,7 +982,7 @@ branch refs/heads/feature/test
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{Defaults: config.Defaults{BaseDir: ".worktrees"}}
+	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -1024,7 +1020,7 @@ branch refs/heads/feature/test
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{Defaults: config.Defaults{BaseDir: ".worktrees"}}
+	cfg := &config.Config{}
 
 	opts := defaultListDisplayOptionsForTests()
 	opts.OutputIsTTY = false
@@ -1065,7 +1061,7 @@ branch refs/heads/feature/test
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{Defaults: config.Defaults{BaseDir: ".worktrees"}}
+	cfg := &config.Config{}
 
 	opts := defaultListDisplayOptionsForTests()
 	opts.Compact = true
@@ -1107,7 +1103,7 @@ branch refs/heads/feature/long
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{Defaults: config.Defaults{BaseDir: ".worktrees"}}
+	cfg := &config.Config{}
 
 	opts := defaultListDisplayOptionsForTests()
 	opts.MaxPathWidth = 30
@@ -1143,7 +1139,7 @@ func TestListCommand_QuietMode_SingleWorktree(t *testing.T) {
 	cmd := &cli.Command{}
 
 	cfg := &config.Config{
-		Defaults: config.Defaults{BaseDir: "../worktrees"},
+		
 	}
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -1191,7 +1187,7 @@ branch refs/heads/feature/another
 	cmd := &cli.Command{}
 
 	cfg := &config.Config{
-		Defaults: config.Defaults{BaseDir: ".worktrees"},
+		
 	}
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -1231,7 +1227,7 @@ func TestListCommand_QuietMode_NoWorktrees(t *testing.T) {
 	cmd := &cli.Command{}
 
 	cfg := &config.Config{
-		Defaults: config.Defaults{BaseDir: "../worktrees"},
+		
 	}
 	err := listCommandWithCommandExecutor(
 		cmd,
@@ -1271,7 +1267,7 @@ detached
 	cmd := &cli.Command{}
 
 	cfg := &config.Config{
-		Defaults: config.Defaults{BaseDir: ".worktrees"},
+		
 	}
 	err := listCommandWithCommandExecutor(
 		cmd,

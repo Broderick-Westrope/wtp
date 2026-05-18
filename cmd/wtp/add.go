@@ -21,6 +21,8 @@ import (
 	"github.com/satococoa/wtp/v2/internal/git"
 	"github.com/satococoa/wtp/v2/internal/hooks"
 	wtpio "github.com/satococoa/wtp/v2/internal/io"
+	"github.com/satococoa/wtp/v2/internal/remote"
+	"github.com/satococoa/wtp/v2/internal/xdg"
 )
 
 // NewAddCommand creates the add command definition
@@ -66,7 +68,7 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Setup repository and configuration
-	_, cfg, mainRepoPath, err := setupRepoAndConfig()
+	repo, cfg, mainRepoPath, err := setupRepoAndConfig()
 	if err != nil {
 		return err
 	}
@@ -74,12 +76,18 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 	// Create command executor
 	executor := command.NewRealExecutor()
 
-	return addCommandWithCommandExecutor(cmd, fw, executor, cfg, mainRepoPath)
+	return addCommandWithCommandExecutor(cmd, fw, executor, cfg, mainRepoPath, repo.GetRemoteURL)
 }
 
-// addCommandWithCommandExecutor is the new implementation using CommandExecutor
+// addCommandWithCommandExecutor is the implementation using CommandExecutor.
+// getRemoteURL is called with "origin" to obtain the remote URL for XDG path resolution.
 func addCommandWithCommandExecutor(
-	cmd *cli.Command, w io.Writer, cmdExec command.Executor, cfg *config.Config, mainRepoPath string,
+	cmd *cli.Command,
+	w io.Writer,
+	cmdExec command.Executor,
+	cfg *config.Config,
+	mainRepoPath string,
+	getRemoteURL func(string) (string, error),
 ) error {
 	// Resolve worktree path and branch name
 	var firstArg string
@@ -87,7 +95,10 @@ func addCommandWithCommandExecutor(
 		firstArg = cmd.Args().Get(0)
 	}
 
-	workTreePath, branchName := resolveWorktreePath(cfg, mainRepoPath, firstArg, cmd)
+	workTreePath, branchName, err := resolveWorktreePath(getRemoteURL, firstArg, cmd)
+	if err != nil {
+		return err
+	}
 
 	// Resolve branch if needed
 	resolvedTrack, err := resolveBranchTracking(cmd, branchName, mainRepoPath)
@@ -123,7 +134,7 @@ func addCommandWithCommandExecutor(
 		return fmt.Errorf("worktree was created at '%s', but --exec command failed: %w", workTreePath, err)
 	}
 
-	if err := displaySuccessMessage(w, branchName, workTreePath, cfg, mainRepoPath); err != nil {
+	if err := displaySuccessMessage(w, branchName, workTreePath, mainRepoPath); err != nil {
 		return err
 	}
 
@@ -431,6 +442,12 @@ func setupRepoAndConfig() (*git.Repository, *config.Config, string, error) {
 		mainRepoPath = repo.Path()
 	}
 
+	// Ensure global config exists on first run.
+	if _, ensureErr := config.EnsureGlobalConfig(); ensureErr != nil {
+		// Non-fatal: log but continue.
+		_ = ensureErr
+	}
+
 	cfg, err := config.LoadConfig(mainRepoPath)
 	if err != nil {
 		configPath := mainRepoPath + "/.wtp.yml"
@@ -513,18 +530,13 @@ func completeBranches(_ context.Context, cmd *cli.Command) {
 	}
 }
 
-// displaySuccessMessage is a convenience wrapper for displaySuccessMessageWithCommitish
-func displaySuccessMessage(
-	w io.Writer,
-	branchName, workTreePath string,
-	cfg *config.Config,
-	mainRepoPath string,
-) error {
-	return displaySuccessMessageWithCommitish(w, branchName, workTreePath, "", cfg, mainRepoPath)
+// displaySuccessMessage shows a friendly success message after worktree creation.
+func displaySuccessMessage(w io.Writer, branchName, workTreePath, mainRepoPath string) error {
+	return displaySuccessMessageWithCommitish(w, branchName, workTreePath, "", mainRepoPath)
 }
 
 func displaySuccessMessageWithCommitish(
-	w io.Writer, branchName, workTreePath, commitish string, cfg *config.Config, mainRepoPath string,
+	w io.Writer, branchName, workTreePath, commitish, mainRepoPath string,
 ) error {
 	if _, err := fmt.Fprintln(w, "✅ Worktree created successfully!"); err != nil {
 		return err
@@ -553,10 +565,15 @@ func displaySuccessMessageWithCommitish(
 		return err
 	}
 
-	// Use the consistent worktree naming logic
-	isMain := isMainWorktree(workTreePath, mainRepoPath)
-	worktreeName := getWorktreeNameFromPath(workTreePath, cfg, mainRepoPath, isMain)
-	if _, err := fmt.Fprintf(w, "   wtp cd %s\n", worktreeName); err != nil {
+	// Use branch name directly; fall back to "@" for the main worktree
+	cdName := branchName
+	if cdName == "" {
+		cdName = filepath.Base(workTreePath)
+	}
+	if isMainWorktree(workTreePath, mainRepoPath) {
+		cdName = "@"
+	}
+	if _, err := fmt.Fprintf(w, "   wtp cd %s\n", cdName); err != nil {
 		return err
 	}
 
@@ -578,25 +595,45 @@ func isMainWorktree(workTreePath, mainRepoPath string) bool {
 	return absWorkTreePath == absMainRepoPath
 }
 
-// resolveWorktreePath determines the worktree path and branch name based on arguments
+// resolveWorktreePath determines the worktree path and branch name.
+// It uses the remote origin URL to compute the XDG-based centralized storage path.
+// getRemoteURL is called with "origin" — inject a mock for testing.
 func resolveWorktreePath(
-	cfg *config.Config, repoPath, firstArg string, cmd *cli.Command,
-) (workTreePath, branchName string) {
-	// Generate path automatically from branch name
+	getRemoteURL func(string) (string, error),
+	firstArg string,
+	cmd *cli.Command,
+) (workTreePath, branchName string, err error) {
+	// Determine branch name from flags or positional argument.
 	branchName = firstArg
-
-	// If -b flag is provided, use that as the branch name for path generation
 	if newBranch := cmd.String("branch"); newBranch != "" {
 		branchName = newBranch
 	}
 
-	// If still no branch name, try to use the first argument
-	if branchName == "" && firstArg != "" {
-		branchName = firstArg
+	// Obtain the remote origin URL.
+	originURL, err := getRemoteURL("origin")
+	if err != nil {
+		return "", branchName, fmt.Errorf(
+			"no 'origin' remote found; set one with 'git remote add origin <url>'",
+		)
 	}
 
-	workTreePath = cfg.ResolveWorktreePath(repoPath, branchName)
-	return workTreePath, branchName
+	// Parse the URL into a repo identifier for path construction.
+	repoID, err := remote.Parse(originURL)
+	if err != nil {
+		return "", branchName, fmt.Errorf(
+			"could not parse remote URL %q: %w\n(if this looks like a valid URL, please file a bug)",
+			originURL, err,
+		)
+	}
+
+	// Compute parent directory and ensure it exists.
+	parentDir := filepath.Join(xdg.WorktreeStorageRoot(), repoID.StoragePath())
+	if ensureErr := xdg.EnsureDir(parentDir); ensureErr != nil {
+		return "", branchName, ensureErr
+	}
+
+	workTreePath = filepath.Join(parentDir, branchName)
+	return workTreePath, branchName, nil
 }
 
 // resolveBranchTracking handles branch resolution and tracking setup

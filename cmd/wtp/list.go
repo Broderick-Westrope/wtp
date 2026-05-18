@@ -222,9 +222,10 @@ func parseWorktreesFromOutput(output string) []git.Worktree {
 	return worktrees
 }
 
-// isWorktreeManagedList determines if a worktree is managed by wtp (for list command)
-func isWorktreeManagedList(worktreePath string, cfg *config.Config, mainRepoPath string, isMain bool) bool {
-	return isWorktreeManagedCommon(worktreePath, cfg, mainRepoPath, isMain)
+// isWorktreeManagedList determines if a worktree is managed by wtp (for list command).
+// TODO(Phase 3): rewrite list.go — all worktrees are first-class.
+func isWorktreeManagedList(_ string, _ *config.Config, _ string, _ bool) bool {
+	return true
 }
 
 // formatBranchDisplay formats branch name for display, following Git conventions
@@ -258,12 +259,9 @@ func truncatePath(path string, maxWidth int) string {
 	return path[:startLen] + ellipsis + path[len(path)-endLen:]
 }
 
-// getWorktreeDisplayName returns the display name for a worktree, with fallback for nil config
-func getWorktreeDisplayName(wt git.Worktree, cfg *config.Config, mainRepoPath string) string {
-	if cfg != nil {
-		return getWorktreeNameFromPath(wt.Path, cfg, mainRepoPath, wt.IsMain)
-	}
-	// Fallback when config can't be loaded
+// getWorktreeDisplayName returns the display name for a worktree, with fallback for nil config.
+// TODO(Phase 3): rewrite list.go to use branch names throughout.
+func getWorktreeDisplayName(wt git.Worktree, _ *config.Config, _ string) string {
 	if wt.IsMain {
 		return "@"
 	}
