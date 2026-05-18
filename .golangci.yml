@@ -70,6 +70,9 @@ linters:
         - force
         - version
         - keep-branch
+        - worktree
+        - git
+        - config
     gocyclo:
       min-complexity: 15
     misspell:
@@ -103,9 +106,20 @@ linters:
           - mnd
           - goconst
           - gosec
+      - path: test/e2e/
+        linters:
+          - gosec
       - linters:
           - lll
         source: "^//go:generate "
+      # G204: Subprocess launched with variable — expected for a CLI wrapping git/gh
+      - linters:
+          - gosec
+        text: "G204:"
+      # G703: Path traversal via taint analysis — expected for a tool managing filesystem paths
+      - linters:
+          - gosec
+        text: "G703:"
 
 formatters:
   enable:
