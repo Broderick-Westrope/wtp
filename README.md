@@ -12,8 +12,9 @@ functionality with automated setup, branch tracking, and project-specific hooks.
 solution:** `wtp add feature/auth`
 
 wtp automatically generates sensible paths based on branch names. Your
-`feature/auth` branch goes to `worktrees/feature/auth` - no redundant typing,
-no path errors.
+`feature/auth` branch goes to
+`~/.local/share/wtp/worktrees/<owner>/<repo>/feature/auth` - no redundant
+typing, no path errors, and no clutter inside your project directory.
 
 ### 🧹 Clean Branch Management
 
@@ -76,6 +77,8 @@ worktree (or just `wtp cd`). No more terminal tab confusion.
   - Bash (4+/5.x) with bash-completion v2
   - Zsh
   - Fish
+- `gh` CLI _(optional)_ — enables PR/CI status columns in `wtp list` and
+  powers auto-archive of merged branches
 
 ## Releases
 
@@ -133,16 +136,16 @@ sudo mv wtp /usr/local/bin/  # or add to PATH
 
 ```bash
 # Create worktree from existing branch (local or remote)
-# → Creates worktree at worktrees/feature/auth
+# → Creates worktree at ~/.local/share/wtp/worktrees/<owner>/<repo>/feature/auth
 # Automatically tracks remote branch if not found locally
 wtp add feature/auth
 
 # Create worktree with new branch
-# → Creates worktree at worktrees/feature/new-feature
+# → Creates worktree at ~/.local/share/wtp/worktrees/<owner>/<repo>/feature/new-feature
 wtp add -b feature/new-feature
 
 # Create new branch from specific commit
-# → Creates worktree at worktrees/hotfix/urgent
+# → Creates worktree at ~/.local/share/wtp/worktrees/<owner>/<repo>/hotfix/urgent
 wtp add -b hotfix/urgent abc1234
 
 # Create worktree and run a command inside it after hooks
@@ -150,7 +153,7 @@ wtp add -b hotfix/urgent abc1234
 wtp add -b feature/new-feature --exec "npm test"
 
 # Create new branch tracking a different remote branch
-# → Creates worktree at worktrees/feature/test with branch tracking origin/main
+# → Creates worktree at ~/.local/share/wtp/worktrees/<owner>/<repo>/feature/test
 wtp add -b feature/test origin/main
 
 # Remote branch handling examples:
@@ -171,15 +174,27 @@ wtp add -b feature/shared upstream/feature/shared
 ### Management Commands
 
 ```bash
-# List all worktrees
+# List all worktrees (shows PR and CI columns when gh CLI is available)
 wtp list
 
-# Example output:
-# PATH                      BRANCH           HEAD
-# ----                      ------           ----
-# @ (main worktree)*        main             c72c7800
-# feature/auth              feature/auth     def45678
-# ../project-hotfix         hotfix/urgent    abc12345
+# Example output (with gh CLI):
+# BRANCH            PR        CI        HEAD
+# ------            --        --        ----
+# @*                                    c72c7800
+# feature/auth      #42 open  ✓ pass    def45678
+# hotfix/urgent     #17 open  ✗ fail    abc12345
+
+# Example output (without gh CLI):
+# BRANCH            HEAD
+# ------            ----
+# @*                c72c7800
+# feature/auth      def45678
+
+# Show archived worktrees too
+wtp list --all
+
+# Skip gh calls and auto-archive (faster, offline-friendly)
+wtp list --no-sync
 
 # Remove worktree and branch (default behavior)
 wtp remove feature/auth                            # Removes worktree and branch
@@ -190,21 +205,50 @@ wtp remove --force-branch feature/auth             # Force branch deletion if un
 wtp remove --keep-branch feature/auth              # Removes worktree, keeps branch
 wtp remove -k feature/auth                         # Same as --keep-branch (alias)
 
+# Archive / unarchive worktrees (hide from list without removing)
+wtp archive feature/auth                           # Hides from wtp list
+wtp unarchive feature/auth                         # Makes visible again
+# Note: merged PRs are auto-archived when gh CLI is available
+
+# Diagnose common wtp issues (v2 worktrees, orphaned state, gh status)
+wtp doctor
+
 # Execute a command in an existing worktree (uses same target resolution as `wtp cd`)
 wtp exec feature/auth -- go test ./...
 wtp exec @ -- pwd
 ```
 
+## Worktree Storage
+
+v3 stores all worktrees in a **centralized location** outside your repository:
+
+```
+$XDG_DATA_HOME/wtp/worktrees/
+└── <owner>/
+    └── <repo>/
+        ├── feature/
+        │   ├── auth/          # wtp add feature/auth
+        │   └── payment/       # wtp add feature/payment
+        └── hotfix/
+            └── bug-123/       # wtp add hotfix/bug-123
+```
+
+On Linux this defaults to `~/.local/share/wtp/worktrees/`. On macOS it follows
+the XDG convention (usually `~/.local/share/wtp/worktrees/` unless
+`XDG_DATA_HOME` is set).
+
+Branch names with slashes are preserved as directory structure, automatically
+organising worktrees by type/category — while keeping your project directory
+clean.
+
+> **Migrating from v2?** Run `wtp doctor` to detect any old-style worktrees
+> stored inside the repository and get instructions for cleaning them up.
+
 ## Configuration
 
-wtp uses `.wtp.yml` for project-specific configuration:
+wtp uses `.wtp.yml` for project-specific hook configuration:
 
 ```yaml
-version: "1.0"
-defaults:
-  # Base directory for worktrees (relative to project root)
-  base_dir: "worktrees"
-
 hooks:
   post_create:
     # Copy gitignored files from main worktree to new worktree
@@ -314,7 +358,7 @@ wtp shell-init fish | source
 ```
 
 > **Note:** Bash completion requires bash-completion v2. On macOS, install
-> Homebrew’s Bash 5.x and `bash-completion@2`, then
+> Homebrew's Bash 5.x and `bash-completion@2`, then
 > `source /opt/homebrew/etc/profile.d/bash_completion.sh` (or the path shown
 > after installation) before enabling the one-liner above.
 
@@ -366,27 +410,6 @@ wtp cd <TAB>
 Homebrew ships a lightweight bootstrapper. Press `TAB` after typing `wtp` and it
 evaluates `wtp shell-init <shell>` once for your session—tab completion and
 `wtp cd` just work.
-
-## Worktree Structure
-
-With the default configuration (`base_dir: "worktrees"`):
-
-```
-<project-root>/
-├── .git/
-├── .wtp.yml
-├── src/
-└── worktrees/
-    ├── main/
-    ├── feature/
-    │   ├── auth/          # wtp add feature/auth
-    │   └── payment/       # wtp add feature/payment
-    └── hotfix/
-        └── bug-123/       # wtp add hotfix/bug-123
-```
-
-Branch names with slashes are preserved as directory structure, automatically
-organizing worktrees by type/category.
 
 ## Error Handling
 
