@@ -217,10 +217,16 @@ wtp unarchive feature/auth                         # Makes visible again
 # Diagnose common wtp issues (v2 worktrees, orphaned state, gh status)
 wtp doctor
 
+# Create a .wtp.yml config file with hook examples
+wtp init
+
 # Execute a command in an existing worktree (uses same target resolution as `wtp cd`)
 wtp exec feature/auth -- go test ./...
 wtp exec @ -- pwd
 ```
+
+> **Note:** `wtp add` requires an `origin` remote to derive the centralized
+> storage path. Local-only repos without remotes are not supported.
 
 ## Worktree Storage
 
@@ -237,6 +243,9 @@ $XDG_DATA_HOME/wtp/worktrees/
             └── bug-123/       # wtp add hotfix/bug-123
 ```
 
+For non-github.com remotes, a `<host>/` prefix is added (e.g.
+`gitlab.com/<owner>/<repo>/...`).
+
 On Linux this defaults to `~/.local/share/wtp/worktrees/`. On macOS it follows
 the XDG convention (usually `~/.local/share/wtp/worktrees/` unless
 `XDG_DATA_HOME` is set).
@@ -250,7 +259,19 @@ clean.
 
 ## Configuration
 
-wtp uses `.wtp.yml` for project-specific hook configuration:
+### Global Config
+
+wtp reads an optional global config from `$XDG_CONFIG_HOME/wtp/config.yml`:
+
+```yaml
+# How long PR/CI status is cached before re-fetching (default: 60s)
+cache_ttl: 60s # accepts durations like "30s", "5m" or integer seconds
+```
+
+### Project Config
+
+wtp uses `.wtp.yml` in the repository root for project-specific hook
+configuration. Run `wtp init` to create one with commented examples:
 
 ```yaml
 hooks:
@@ -312,6 +333,13 @@ hooks:
 
 This behavior applies regardless of where you run `wtp add` from (main worktree
 or any other worktree).
+
+### Hook Environment Variables
+
+Command hooks receive these environment variables:
+
+- `GIT_WTP_WORKTREE_PATH` — absolute path to the newly created worktree
+- `GIT_WTP_REPO_ROOT` — absolute path to the main worktree (repository root)
 
 ### Symlink Hooks: Shared Assets
 
@@ -408,10 +436,10 @@ Then use the simplified syntax:
 # Change to a worktree by its name
 wtp cd feature/auth
 
-# Go to the main worktree (same as @)
+# Interactive picker (fzf) or main worktree fallback
 wtp cd
 
-# Change to the root worktree using the '@' shorthand
+# Always go to the main worktree
 wtp cd @
 
 # Tab completion works!
