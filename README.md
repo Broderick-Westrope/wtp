@@ -225,6 +225,30 @@ wtp exec feature/auth -- go test ./...
 wtp exec @ -- pwd
 ```
 
+#### PR Review Workflow
+
+Combine `wtp add`, `wtp exec`, and the `gh` CLI into a shell function for
+one-command PR reviews:
+
+```bash
+wtp-review() {
+  local branch=$(gh pr view "$1" --json headRefName -q .headRefName)
+  git fetch origin "$branch"
+  if ! wtp add "$branch" --exec "$EDITOR ." 2>/dev/null; then
+    wtp exec "$branch" -- $EDITOR .
+  fi
+}
+```
+
+This fetches the PR branch, creates a worktree (or reuses an existing one), and
+opens it in your editor. Works with PR URLs, numbers, or branch names:
+
+```bash
+wtp-review https://github.com/owner/repo/pull/123
+wtp-review 123
+wtp-review feature/some-branch
+```
+
 > **Note:** `wtp add` requires an `origin` remote to derive the centralized
 > storage path. Local-only repos without remotes are not supported.
 
