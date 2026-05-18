@@ -240,7 +240,7 @@ func cleanupCentralizedWorktreeDir(worktreePath string) {
 
 	// Walk upward from leaf, removing empty dirs until we reach storageRoot.
 	dir := absPath
-	for dir != absRoot {
+	for dir != absRoot && dir != filepath.Dir(dir) {
 		if err := os.Remove(dir); err != nil {
 			// Non-empty dir or other error — stop climbing.
 			break
