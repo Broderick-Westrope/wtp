@@ -31,9 +31,8 @@ import (
 const (
 	branchHeaderDashes = 6
 	headDisplayLength  = 8
-	detachedKeyword    = "detached"
-	ghHintFileName     = ".gh-hint-shown"
-	prStateMerged      = "MERGED"
+	detachedKeyword = "detached"
+	ghHintFileName  = ".gh-hint-shown"
 )
 
 const (
@@ -292,7 +291,7 @@ func fetchPRCIForBranch(
 
 		shared.mu.Lock()
 		shared.prciData[wt.Branch] = prciFromCache(&cached)
-		if cached.PRState == prStateMerged && !shared.archivedBranches[wt.Branch] {
+		if cached.PRState == github.StateMerged && !shared.archivedBranches[wt.Branch] {
 			shared.archivedBranches[wt.Branch] = true
 			toArchive = &archiveRequest{branch: wt.Branch, prNumber: cached.PRNumber}
 		}
@@ -342,7 +341,7 @@ func fetchPRCIForBranch(
 		ciFmt: ciFmt,
 	}
 
-	if pr != nil && pr.State == prStateMerged && !shared.archivedBranches[wt.Branch] {
+	if pr != nil && pr.State == github.StateMerged && !shared.archivedBranches[wt.Branch] {
 		shared.archivedBranches[wt.Branch] = true
 		toArchive = &archiveRequest{branch: wt.Branch, prNumber: pr.Number}
 	}

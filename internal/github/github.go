@@ -16,8 +16,11 @@ const (
 	cmdTimeout  = 10 * time.Second
 	stateReady  = "OPEN"
 	stateDraft  = "DRAFT"
-	stateMerged = "MERGED"
 	stateClosed = "CLOSED"
+
+	// StateMerged is the PR state for merged pull requests. Exported for use
+	// by callers that need to check PR state (e.g. auto-archive logic).
+	StateMerged = "MERGED"
 
 	checkStatePassing = "pass"
 	checkStateFailing = "fail"
@@ -205,7 +208,7 @@ func FormatPRState(pr *PRInfo) string {
 	var label string
 
 	switch pr.State {
-	case stateMerged:
+	case StateMerged:
 		label = "Merged"
 	case stateClosed:
 		label = "Closed"
