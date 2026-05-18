@@ -108,12 +108,11 @@ func TestDoctor_CheckOrphanedStateEntries_NilRepoID(t *testing.T) {
 // ===== checkGHStatus Tests =====
 
 func TestDoctor_CheckGHStatus_Available(t *testing.T) {
-	if !listIsGHAvailable() {
-		t.Skip("gh CLI not available in this environment")
-	}
+	old := doctorIsGHAvailable
+	doctorIsGHAvailable = func() bool { return true }
+	t.Cleanup(func() { doctorIsGHAvailable = old })
 
 	var buf bytes.Buffer
-	// checkGHStatus uses github.IsAvailable() directly, not the mockable var
 	count := checkGHStatus(&buf)
 
 	output := buf.String()
@@ -123,24 +122,15 @@ func TestDoctor_CheckGHStatus_Available(t *testing.T) {
 }
 
 func TestDoctor_CheckGHStatus_NotAvailable(t *testing.T) {
-	// Test the output format by simulating not-available output
-	var buf bytes.Buffer
+	old := doctorIsGHAvailable
+	doctorIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { doctorIsGHAvailable = old })
 
-	// We can't mock github.IsAvailable in doctor.go directly, but we can
-	// test that the output format is correct by calling checkGHStatus
-	// in an environment where gh is not in PATH.
-	// If gh IS available, just verify the output contains known strings.
-	if listIsGHAvailable() {
-		count := checkGHStatus(&buf)
-		output := buf.String()
-		assert.Contains(t, output, "gh CLI")
-		_ = count
-	} else {
-		count := checkGHStatus(&buf)
-		output := buf.String()
-		assert.Contains(t, output, "✗ gh CLI not found")
-		assert.Greater(t, count, 0)
-	}
+	var buf bytes.Buffer
+	count := checkGHStatus(&buf)
+	output := buf.String()
+	assert.Contains(t, output, "✗ gh CLI not found")
+	assert.Greater(t, count, 0)
 }
 
 // ===== checkOrphanedCentralizedDirs Tests =====

@@ -21,6 +21,7 @@ import (
 )
 
 var doctorGetwd = os.Getwd
+var doctorIsGHAvailable = github.IsAvailable
 
 // NewDoctorCommand creates the doctor command.
 func NewDoctorCommand() *cli.Command {
@@ -245,7 +246,7 @@ func walkCentralizedDirs(
 // Returns number of issues found.
 func checkGHStatus(w io.Writer) int {
 	count := 0
-	if !github.IsAvailable() {
+	if !doctorIsGHAvailable() {
 		_, _ = fmt.Fprintln(w, "✗ gh CLI not found")
 		_, _ = fmt.Fprintln(w, "  Install from: https://cli.github.com")
 		count++
