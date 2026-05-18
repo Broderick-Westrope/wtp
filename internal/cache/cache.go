@@ -103,6 +103,7 @@ func (s *Store) writeAtomic(c Cache) error {
 	}
 
 	if err := os.Rename(tmpPath, s.path); err != nil {
+		_ = os.Remove(tmpPath) // best-effort cleanup of orphaned temp file
 		return fmt.Errorf("rename cache file: %w", err)
 	}
 
