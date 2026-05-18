@@ -71,7 +71,7 @@ changelog:
 brews:
   - name: wtp
     repository:
-      owner: satococoa
+      owner: Broderick-Westrope
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     url_template: "https://github.com/Broderick-Westrope/wtp/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
@@ -170,7 +170,7 @@ brews:
 
 release:
   github:
-    owner: satococoa
+    owner: Broderick-Westrope
     name: wtp
   draft: false
   prerelease: auto
@@ -185,7 +185,7 @@ release:
 
     ### Homebrew
     ```bash
-    brew install satococoa/tap/wtp
+    brew install Broderick-Westrope/tap/wtp
     ```
 
     ### Manual Installation
@@ -203,9 +203,9 @@ nfpms:
       {{- if eq .Arch "amd64" }}x86_64
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
-    vendor: satococoa
+    vendor: Broderick-Westrope
     homepage: https://github.com/Broderick-Westrope/wtp
-    maintainer: satococoa <satococoa@example.com>
+    maintainer: Broderick Westrope <brodie.westrope@gmail.com>
     description: |-
       Worktree Plus - Enhanced worktree management with automated setup and hooks.
       A powerful Git worktree management tool that extends git's worktree functionality
