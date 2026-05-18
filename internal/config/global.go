@@ -24,7 +24,7 @@ type GlobalConfig struct {
 	CacheTTL time.Duration `yaml:"cache_ttl"`
 }
 
-// MarshalYAML serialises GlobalConfig, encoding CacheTTL as a human-readable
+// MarshalYAML serializes GlobalConfig, encoding CacheTTL as a human-readable
 // duration string (e.g. "1m0s").
 func (c GlobalConfig) MarshalYAML() (interface{}, error) {
 	return struct {
@@ -121,7 +121,7 @@ func SaveGlobalConfig(cfg GlobalConfig) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		// Best-effort cleanup of the temp file.
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to finalise global config write: %w", err)
+		return fmt.Errorf("failed to finalize global config write: %w", err)
 	}
 
 	return nil

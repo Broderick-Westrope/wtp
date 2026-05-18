@@ -263,7 +263,7 @@ func fetchPRCIData(
 		key := repoID.StateKey(wt.Branch)
 
 		// Use cached data if fresh
-		if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(cached, ttl) {
+		if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
 			var prFmt string
 			if cached.PRNumber > 0 {
 				prFmt = github.FormatPRState(&github.PRInfo{

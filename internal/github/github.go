@@ -1,9 +1,11 @@
+// Package github provides helpers for interacting with the GitHub CLI (gh).
 package github
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -168,7 +170,7 @@ func GetCIStatus(branch string) (*CIStatus, error) {
 		switch strings.ToLower(c.State) {
 		case checkStatePassing, "success", "completed":
 			ci.Passing++
-		case checkStateFailing, "failure", "error", "timed_out", "cancelled", "action_required":
+		case checkStateFailing, "failure", "error", "timed_out", "canceled", "action_required":
 			ci.Failing++
 		case checkStatePending, "queued", "in_progress", "waiting", "requested":
 			ci.Pending++
@@ -237,7 +239,8 @@ func FormatCIStatus(ci *CIStatus) string {
 // isExitError is a helper that avoids importing exec in the caller via a type
 // assertion and returns whether err is an *exec.ExitError.
 func isExitError(err error, target **exec.ExitError) bool {
-	if ee, ok := err.(*exec.ExitError); ok {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
 		if target != nil {
 			*target = ee
 		}

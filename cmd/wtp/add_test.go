@@ -18,6 +18,9 @@ import (
 	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
+// testOriginURL is the GitHub HTTPS URL used across add command tests.
+const testOriginURL = "https://github.com/owner/repo.git"
+
 // ===== Test helpers =====
 
 // mockGetRemoteURL returns a getRemoteURL function that returns originURL for "origin".
@@ -447,7 +450,7 @@ func TestAddCommand_SuccessMessage(t *testing.T) {
 
 			cfg := &config.Config{}
 
-			err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL("https://github.com/owner/repo.git"))
+			err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 			assert.NoError(t, err)
 			assert.Contains(t, buf.String(), tt.expectedOutput)
@@ -523,7 +526,7 @@ func TestAddCommand_ExecutionError(t *testing.T) {
 	cmd := createTestCLICommand(map[string]any{"branch": "feature/auth"}, []string{"feature/auth"})
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL("https://github.com/owner/repo.git"))
+	err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 	assert.Error(t, err)
 	assert.Len(t, mockExec.executedCommands, 1)
@@ -546,7 +549,7 @@ func TestAddCommand_ExecFailureKeepsCreationContext(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, exec, cfg, "/test/repo", mockGetRemoteURL("https://github.com/owner/repo.git"))
+	err := addCommandWithCommandExecutor(cmd, &buf, exec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "worktree was created")
@@ -584,11 +587,11 @@ func TestAddCommand_InternationalCharacters(t *testing.T) {
 			cmd := createTestCLICommand(map[string]any{"branch": tt.branchName}, []string{tt.branchName})
 			cfg := &config.Config{}
 
-			err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL("https://github.com/owner/repo.git"))
+			err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 			assert.NoError(t, err)
 			assert.Len(t, mockExec.executedCommands, 1)
-			expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner/repo", tt.branchName)
+			expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner", "repo", tt.branchName)
 			assert.Contains(t, mockExec.executedCommands[0].Args, expectedPath)
 		})
 	}
@@ -644,7 +647,7 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 		cmd := createTestCLICommand(map[string]any{}, []string{"main"})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL("https://github.com/owner/repo.git"))
+		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 		// resolveBranchTracking calls git.NewRepository which requires a real repo
 		assert.Error(t, err)
@@ -660,11 +663,11 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 		cmd := createTestCLICommand(map[string]any{"branch": "feature/new"}, []string{})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL("https://github.com/owner/repo.git"))
+		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 		assert.NoError(t, err)
 		assert.Len(t, mockExec.executedCommands, 1)
-		expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner/repo/feature/new")
+		expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner", "repo", "feature", "new")
 		assert.Equal(t, []string{"worktree", "add", "-b", "feature/new", expectedPath},
 			mockExec.executedCommands[0].Args)
 		assert.Contains(t, buf.String(), "✅ Worktree created successfully!")
@@ -679,11 +682,11 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 		cmd := createTestCLICommand(map[string]any{"branch": "hotfix/urgent"}, []string{"main"})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL("https://github.com/owner/repo.git"))
+		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 		assert.NoError(t, err)
 		assert.Len(t, mockExec.executedCommands, 1)
-		expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner/repo/hotfix/urgent")
+		expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner", "repo", "hotfix", "urgent")
 		assert.Equal(t, []string{"worktree", "add", "-b", "hotfix/urgent", expectedPath, "main"},
 			mockExec.executedCommands[0].Args)
 		assert.Contains(t, buf.String(), "✅ Worktree created successfully!")
@@ -897,7 +900,7 @@ func TestAddCommand_HookPathResolution(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", dataHome)
 
 	// The worktree will be created at $XDG_DATA_HOME/wtp/worktrees/owner/repo/feature/test
-	expectedWorktreePath := filepath.Join(xdg.WorktreeStorageRoot(), "owner/repo/feature/test")
+	expectedWorktreePath := filepath.Join(xdg.WorktreeStorageRoot(), "owner", "repo", "feature", "test")
 
 	// The hooks executor is given the repoRoot as "from" base and the XDG path as "to" base.
 	// We just verify the paths passed to executePostCreateHooks are consistent.

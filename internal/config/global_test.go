@@ -73,7 +73,7 @@ func TestGlobalEnsureCreatesFile(t *testing.T) {
 	}
 
 	// File must exist now.
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
 		t.Fatalf("expected config file to exist after first EnsureGlobalConfig")
 	}
 
@@ -102,7 +102,6 @@ func TestGlobalDurationParsing(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.yaml, func(t *testing.T) {
 			tmpDir := t.TempDir()
 			setXDGConfigHome(t, tmpDir)

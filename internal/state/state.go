@@ -14,6 +14,8 @@ import (
 	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
+const stateFileMode = 0o600 // owner read/write only
+
 // Store holds the paths used to persist and lock the state file.
 type Store struct {
 	path     string // path to state.json
@@ -91,7 +93,7 @@ func (s *Store) writeAtomic(state State) error {
 
 	tmpPath := s.path + ".tmp"
 
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, stateFileMode); err != nil {
 		return fmt.Errorf("write tmp state file: %w", err)
 	}
 

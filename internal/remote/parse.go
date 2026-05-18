@@ -117,8 +117,9 @@ func (r RepoIdentifier) StateKey(branch string) string {
 // The split is performed on the first "::" so that branch names containing "::" are preserved.
 // Example: "owner/repo::fix::hotfix" → ("owner/repo", "fix::hotfix").
 func ParseStateKey(key string) (repoPath, branch string) {
-	parts := strings.SplitN(key, "::", 2) //nolint:mnd // split on first ::
-	if len(parts) != 2 {
+	const splitCount = 2
+	parts := strings.SplitN(key, "::", splitCount)
+	if len(parts) != splitCount {
 		return key, ""
 	}
 

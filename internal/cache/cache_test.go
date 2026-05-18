@@ -42,7 +42,7 @@ func TestSetGet_RoundTrip(t *testing.T) {
 		CIStatus: "success",
 	}
 
-	require.NoError(t, s.Set(key, entry))
+	require.NoError(t, s.Set(key, &entry))
 
 	got, ok := s.Get(key)
 	require.True(t, ok)
@@ -59,10 +59,10 @@ func TestIsExpired(t *testing.T) {
 	ttl := 5 * time.Minute
 
 	fresh := cache.WorktreeCache{UpdatedAt: time.Now()}
-	assert.False(t, s.IsExpired(fresh, ttl), "brand-new entry should not be expired")
+	assert.False(t, s.IsExpired(&fresh, ttl), "brand-new entry should not be expired")
 
 	stale := cache.WorktreeCache{UpdatedAt: time.Now().Add(-10 * time.Minute)}
-	assert.True(t, s.IsExpired(stale, ttl), "entry older than TTL should be expired")
+	assert.True(t, s.IsExpired(&stale, ttl), "entry older than TTL should be expired")
 }
 
 func TestDelete_RemovesEntry(t *testing.T) {
@@ -70,7 +70,7 @@ func TestDelete_RemovesEntry(t *testing.T) {
 
 	const key = "owner/repo::main"
 
-	require.NoError(t, s.Set(key, cache.WorktreeCache{PRNumber: 1}))
+	require.NoError(t, s.Set(key, &cache.WorktreeCache{PRNumber: 1}))
 
 	_, ok := s.Get(key)
 	require.True(t, ok, "entry should exist after Set")

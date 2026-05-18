@@ -128,7 +128,7 @@ func (r *Repository) RemoveWorktree(path string, force bool) error {
 // GetRemoteURL returns the URL for the given remote name.
 // It runs `git remote get-url <remoteName>` and returns the trimmed output.
 func (r *Repository) GetRemoteURL(remoteName string) (string, error) {
-	cmd := exec.Command("git", "remote", "get-url", remoteName) //nolint:gosec // remoteName is caller-controlled
+	cmd := exec.Command("git", "remote", "get-url", remoteName)
 	cmd.Dir = r.path
 	output, err := cmd.Output()
 	if err != nil {

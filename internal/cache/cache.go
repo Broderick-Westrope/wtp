@@ -15,6 +15,8 @@ import (
 	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
+const cacheFileMode = 0o600 // owner read/write only
+
 // Store holds the paths used to persist and lock the cache file.
 type Store struct {
 	path     string // path to cache.json
@@ -96,7 +98,7 @@ func (s *Store) writeAtomic(c Cache) error {
 
 	tmpPath := s.path + ".tmp"
 
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	if err := os.WriteFile(tmpPath, data, cacheFileMode); err != nil {
 		return fmt.Errorf("write tmp cache file: %w", err)
 	}
 
@@ -150,16 +152,16 @@ func (s *Store) Get(key string) (WorktreeCache, bool) {
 }
 
 // IsExpired reports whether entry is older than ttl.
-func (s *Store) IsExpired(entry WorktreeCache, ttl time.Duration) bool {
+func (*Store) IsExpired(entry *WorktreeCache, ttl time.Duration) bool {
 	return time.Since(entry.UpdatedAt) > ttl
 }
 
 // Set stores entry for key, setting UpdatedAt to the current time.
-func (s *Store) Set(key string, entry WorktreeCache) error {
+func (s *Store) Set(key string, entry *WorktreeCache) error {
 	entry.UpdatedAt = time.Now()
 
 	return s.withLock(func(c Cache) (Cache, error) {
-		c.Worktrees[key] = entry
+		c.Worktrees[key] = *entry
 
 		return c, nil
 	})
