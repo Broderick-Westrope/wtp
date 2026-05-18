@@ -31,8 +31,8 @@ import (
 const (
 	branchHeaderDashes = 6
 	headDisplayLength  = 8
-	detachedKeyword = "detached"
-	ghHintFileName  = ".gh-hint-shown"
+	detachedKeyword    = "detached"
+	ghHintFileName     = ".gh-hint-shown"
 )
 
 const (
@@ -132,18 +132,16 @@ func listCommand(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	opts := resolveListDisplayOptions(cmd, w)
-
-	quiet := cmd.Bool("quiet")
-	showAll := cmd.Bool("all")
-	noSync := cmd.Bool("no-sync")
+	opts.Quiet = cmd.Bool("quiet")
+	opts.ShowAll = cmd.Bool("all")
+	opts.NoSync = cmd.Bool("no-sync")
 
 	executor := listNewExecutor()
-	return listCommandWithCommandExecutor(ctx, cmd, w, executor, mainRepoPath, quiet, showAll, noSync, opts)
+	return listCommandWithCommandExecutor(ctx, cmd, w, executor, mainRepoPath, opts)
 }
 
 func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many distinct display paths
 	ctx context.Context, _ *cli.Command, w io.Writer, executor command.Executor, mainRepoPath string,
-	quiet, showAll, noSync bool,
 	opts listDisplayOptions,
 ) error {
 	cwd, err := listGetwd()
@@ -160,7 +158,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	worktrees := parseWorktreesFromOutput(result.Results[0].Output)
 
 	if len(worktrees) == 0 {
-		if !quiet {
+		if !opts.Quiet {
 			if _, err := fmt.Fprintln(w, "No worktrees found"); err != nil {
 				return err
 			}
@@ -196,7 +194,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	// Filter out archived worktrees unless --all
 	displayWorktrees := make([]git.Worktree, 0, len(worktrees))
 	for _, wt := range worktrees {
-		if !showAll && archivedBranches[wt.Branch] {
+		if !opts.ShowAll && archivedBranches[wt.Branch] {
 			continue
 		}
 		displayWorktrees = append(displayWorktrees, wt)
@@ -206,13 +204,13 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	prciData := make(map[string]worktreePRCI)
 	ghAvailable := listIsGHAvailable()
 
-	if ghAvailable && !noSync && !quiet && repoID != nil {
+	if ghAvailable && !opts.NoSync && !opts.Quiet && repoID != nil {
 		if err := fetchPRCIData(ctx, displayWorktrees, repoID, stateStore, archivedBranches, prciData); err != nil {
 			return err
 		}
 
 		// Rebuild displayWorktrees after auto-archiving (unless --all)
-		if !showAll {
+		if !opts.ShowAll {
 			remaining := make([]git.Worktree, 0, len(displayWorktrees))
 			for _, wt := range displayWorktrees {
 				if !archivedBranches[wt.Branch] {
@@ -221,11 +219,11 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 			}
 			displayWorktrees = remaining
 		}
-	} else if !ghAvailable && !quiet {
+	} else if !ghAvailable && !opts.Quiet {
 		maybeShowGHNotAvailableHint()
 	}
 
-	if quiet {
+	if opts.Quiet {
 		return displayWorktreesQuiet(w, displayWorktrees)
 	}
 
@@ -700,6 +698,9 @@ type listDisplayOptions struct {
 	Compact      bool
 	MaxPathWidth int
 	OutputIsTTY  bool
+	Quiet        bool
+	ShowAll      bool
+	NoSync       bool
 }
 
 func resolveListDisplayOptions(cmd *cli.Command, w io.Writer) listDisplayOptions {
