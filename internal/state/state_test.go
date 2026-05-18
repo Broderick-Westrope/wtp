@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/satococoa/wtp/v3/internal/state"
+	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 )
 
 // newTestStore creates a Store backed by a temporary directory and sets

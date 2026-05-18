@@ -3,8 +3,8 @@ package main
 import (
 	"strings"
 
-	"github.com/satococoa/wtp/v3/internal/errors"
-	"github.com/satococoa/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
+	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 )
 
 // resolveWorktreePathByName resolves a worktree path by name.

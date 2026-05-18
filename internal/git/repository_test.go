@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/satococoa/wtp/v3/internal/testutil"
+	"github.com/Broderick-Westrope/wtp/v3/internal/testutil"
 )
 
 func setupTestRepo(t *testing.T) string {

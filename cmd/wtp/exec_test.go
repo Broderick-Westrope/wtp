@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/command"
 )
 
 func TestNewExecCommand(t *testing.T) {

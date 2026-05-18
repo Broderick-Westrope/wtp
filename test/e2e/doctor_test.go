@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/satococoa/wtp/v3/test/e2e/framework"
+	"github.com/Broderick-Westrope/wtp/v3/test/e2e/framework"
 )
 
 // TestDoctorCleanState verifies that doctor reports only gh-related issues on a fresh repo

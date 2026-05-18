@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/command"
 )
 
 // ===== Command Structure Tests =====

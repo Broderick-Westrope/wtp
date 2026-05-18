@@ -8,11 +8,11 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v3/internal/command"
-	"github.com/satococoa/wtp/v3/internal/errors"
-	"github.com/satococoa/wtp/v3/internal/git"
-	"github.com/satococoa/wtp/v3/internal/remote"
-	"github.com/satococoa/wtp/v3/internal/state"
+	"github.com/Broderick-Westrope/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
+	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
+	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 )
 
 var archiveGetwd = os.Getwd

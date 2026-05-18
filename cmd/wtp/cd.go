@@ -12,10 +12,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v3/internal/command"
-	wtperrors "github.com/satococoa/wtp/v3/internal/errors"
-	"github.com/satococoa/wtp/v3/internal/fzf"
-	"github.com/satococoa/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/command"
+	wtperrors "github.com/Broderick-Westrope/wtp/v3/internal/errors"
+	"github.com/Broderick-Westrope/wtp/v3/internal/fzf"
+	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 )
 
 // NewCdCommand creates the cd command definition

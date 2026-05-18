@@ -74,13 +74,13 @@ brews:
       owner: satococoa
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    url_template: "https://github.com/satococoa/wtp/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    url_template: "https://github.com/Broderick-Westrope/wtp/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     download_strategy: CurlDownloadStrategy
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    homepage: "https://github.com/satococoa/wtp"
+    homepage: "https://github.com/Broderick-Westrope/wtp"
     description: "Worktree Plus - Enhanced worktree management with automated setup and hooks"
     license: "MIT"
     skip_upload: auto
@@ -191,7 +191,7 @@ release:
     ### Manual Installation
     Download the appropriate binary for your platform from the assets below.
 
-    **Full Changelog**: https://github.com/satococoa/wtp/compare/{{.PreviousTag}}...{{.Tag}}
+    **Full Changelog**: https://github.com/Broderick-Westrope/wtp/compare/{{.PreviousTag}}...{{.Tag}}
 
 nfpms:
   - id: wtp
@@ -204,7 +204,7 @@ nfpms:
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     vendor: satococoa
-    homepage: https://github.com/satococoa/wtp
+    homepage: https://github.com/Broderick-Westrope/wtp
     maintainer: satococoa <satococoa@example.com>
     description: |-
       Worktree Plus - Enhanced worktree management with automated setup and hooks.

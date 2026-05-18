@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/satococoa/wtp/v3/test/e2e/framework"
+	"github.com/Broderick-Westrope/wtp/v3/test/e2e/framework"
 )
 
 func TestShellIntegration(t *testing.T) {

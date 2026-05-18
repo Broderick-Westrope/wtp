@@ -12,7 +12,7 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"github.com/satococoa/wtp/v3/internal/xdg"
+	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
 
 const cacheFileMode = 0o600 // owner read/write only

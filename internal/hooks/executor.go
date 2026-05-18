@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/satococoa/wtp/v3/internal/config"
+	"github.com/Broderick-Westrope/wtp/v3/internal/config"
 )
 
 const (

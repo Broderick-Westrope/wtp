@@ -3,7 +3,7 @@ package e2e
 import (
 	"testing"
 
-	"github.com/satococoa/wtp/v3/test/e2e/framework"
+	"github.com/Broderick-Westrope/wtp/v3/test/e2e/framework"
 )
 
 // Living Specifications for Worktree Creation Workflows

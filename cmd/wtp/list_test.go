@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v3/internal/command"
-	"github.com/satococoa/wtp/v3/internal/github"
-	"github.com/satococoa/wtp/v3/internal/remote"
-	"github.com/satococoa/wtp/v3/internal/state"
+	"github.com/Broderick-Westrope/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/github"
+	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
+	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 )
 
 func defaultListDisplayOptionsForTests() listDisplayOptions {

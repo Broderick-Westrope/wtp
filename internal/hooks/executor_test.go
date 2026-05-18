@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/satococoa/wtp/v3/internal/config"
+	"github.com/Broderick-Westrope/wtp/v3/internal/config"
 )
 
 func TestExecutePostCreateHooks_NilConfig(t *testing.T) {

@@ -12,7 +12,7 @@ This project adheres to a code of conduct. By participating, you are expected to
 
 Before creating an issue, please:
 
-1. Check if the issue already exists in the [issue tracker](https://github.com/satococoa/wtp/issues)
+1. Check if the issue already exists in the [issue tracker](https://github.com/Broderick-Westrope/wtp/issues)
 2. Use the search function to avoid duplicates
 3. Provide clear reproduction steps and expected vs actual behavior
 4. Include your environment details (OS, Go version, git version)
@@ -30,7 +30,7 @@ We welcome feature suggestions! Please:
 
 ```bash
 # Clone the repository
-git clone https://github.com/satococoa/wtp.git
+git clone https://github.com/Broderick-Westrope/wtp.git
 cd wtp
 
 # Install dependencies

@@ -9,7 +9,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/satococoa/wtp/v3/internal/xdg"
+	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
 
 const (

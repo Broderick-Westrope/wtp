@@ -13,10 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v3/internal/command"
-	"github.com/satococoa/wtp/v3/internal/config"
-	"github.com/satococoa/wtp/v3/internal/errors"
-	"github.com/satococoa/wtp/v3/internal/xdg"
+	"github.com/Broderick-Westrope/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/config"
+	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
+	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
 
 // testOriginURL is the GitHub HTTPS URL used across add command tests.

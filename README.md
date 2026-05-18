@@ -87,48 +87,48 @@ exact match. No more terminal tab confusion.
 ## Releases
 
 View all releases and changelogs:
-[GitHub Releases](https://github.com/satococoa/wtp/releases)
+[GitHub Releases](https://github.com/Broderick-Westrope/wtp/releases)
 
 Latest stable version:
-[See releases](https://github.com/satococoa/wtp/releases/latest)
+[See releases](https://github.com/Broderick-Westrope/wtp/releases/latest)
 
 ## Installation
 
 ### Using Homebrew (macOS/Linux)
 
 ```bash
-brew install satococoa/tap/wtp
+brew install Broderick-Westrope/tap/wtp
 ```
 
 ### Using Go
 
 ```bash
-go install github.com/satococoa/wtp/v3/cmd/wtp@latest
+go install github.com/Broderick-Westrope/wtp/v3/cmd/wtp@latest
 ```
 
 ### Download Binary
 
 Download the latest binary from
-[GitHub Releases](https://github.com/satococoa/wtp/releases):
+[GitHub Releases](https://github.com/Broderick-Westrope/wtp/releases):
 
 ```bash
 # macOS (Apple Silicon)
-curl -L https://github.com/satococoa/wtp/releases/latest/download/wtp_Darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/Broderick-Westrope/wtp/releases/latest/download/wtp_Darwin_arm64.tar.gz | tar xz
 sudo mv wtp /usr/local/bin/
 
 # Linux (x86_64)
-curl -L https://github.com/satococoa/wtp/releases/latest/download/wtp_Linux_x86_64.tar.gz | tar xz
+curl -L https://github.com/Broderick-Westrope/wtp/releases/latest/download/wtp_Linux_x86_64.tar.gz | tar xz
 sudo mv wtp /usr/local/bin/
 
 # Linux (ARM64)
-curl -L https://github.com/satococoa/wtp/releases/latest/download/wtp_Linux_arm64.tar.gz | tar xz
+curl -L https://github.com/Broderick-Westrope/wtp/releases/latest/download/wtp_Linux_arm64.tar.gz | tar xz
 sudo mv wtp /usr/local/bin/
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/satococoa/wtp.git
+git clone https://github.com/Broderick-Westrope/wtp.git
 cd wtp
 go build -o wtp ./cmd/wtp
 sudo mv wtp /usr/local/bin/  # or add to PATH
@@ -479,7 +479,7 @@ for details.
 
 ```bash
 # Clone repository
-git clone https://github.com/satococoa/wtp.git
+git clone https://github.com/Broderick-Westrope/wtp.git
 cd wtp
 
 # Install dependencies

@@ -1,4 +1,4 @@
-module github.com/satococoa/wtp/v3
+module github.com/Broderick-Westrope/wtp/v3
 
 go 1.26
 

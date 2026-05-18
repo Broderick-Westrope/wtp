@@ -16,15 +16,15 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 
-	"github.com/satococoa/wtp/v3/internal/cache"
-	"github.com/satococoa/wtp/v3/internal/command"
-	"github.com/satococoa/wtp/v3/internal/config"
-	"github.com/satococoa/wtp/v3/internal/errors"
-	"github.com/satococoa/wtp/v3/internal/git"
-	"github.com/satococoa/wtp/v3/internal/github"
-	"github.com/satococoa/wtp/v3/internal/remote"
-	"github.com/satococoa/wtp/v3/internal/state"
-	"github.com/satococoa/wtp/v3/internal/xdg"
+	"github.com/Broderick-Westrope/wtp/v3/internal/cache"
+	"github.com/Broderick-Westrope/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/config"
+	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
+	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/github"
+	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
+	"github.com/Broderick-Westrope/wtp/v3/internal/state"
+	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
 
 // Display constants
