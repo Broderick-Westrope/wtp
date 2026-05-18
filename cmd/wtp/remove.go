@@ -12,9 +12,12 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/satococoa/wtp/v2/internal/cache"
 	"github.com/satococoa/wtp/v2/internal/command"
 	"github.com/satococoa/wtp/v2/internal/errors"
 	"github.com/satococoa/wtp/v2/internal/git"
+	"github.com/satococoa/wtp/v2/internal/remote"
+	"github.com/satococoa/wtp/v2/internal/state"
 )
 
 // Variable to allow mocking in tests
@@ -142,6 +145,9 @@ func removeCommandWithCommandExecutor(
 		}
 		return errors.WorktreeRemovalFailed(targetWorktree.Path, result.Results[0].Error)
 	}
+	// Best-effort: clean up state and cache entries for the removed worktree.
+	cleanupWorktreeStateAndCache(cwd, targetWorktree.Branch)
+
 	if _, err := fmt.Fprintf(w, "Removed worktree '%s' at %s\n", worktreeName, targetWorktree.Path); err != nil {
 		return err
 	}
@@ -204,6 +210,38 @@ func removeBranchWithCommandExecutor(
 	}
 	_, err = fmt.Fprintf(w, "Removed branch '%s'\n", branchName)
 	return err
+}
+
+// cleanupWorktreeStateAndCache removes state and cache entries for the given branch after a
+// successful worktree removal. All errors are silently ignored (best-effort).
+func cleanupWorktreeStateAndCache(cwd, branch string) {
+	if branch == "" {
+		return
+	}
+
+	repo, err := git.NewRepository(cwd)
+	if err != nil {
+		return
+	}
+
+	remoteURL, err := repo.GetRemoteURL("origin")
+	if err != nil {
+		return
+	}
+
+	repoID, err := remote.Parse(remoteURL)
+	if err != nil {
+		return
+	}
+
+	key := repoID.StateKey(branch)
+
+	_ = state.NewStore().WithLock(func(st state.State) (state.State, error) {
+		delete(st.Worktrees, key)
+		return st, nil
+	})
+
+	_ = cache.NewStore().Delete(key)
 }
 
 // findTargetWorktreeFromList finds a non-main worktree by branch name.

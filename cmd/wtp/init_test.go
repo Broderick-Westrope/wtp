@@ -135,25 +135,22 @@ func TestInitCommand_Success(t *testing.T) {
 	assert.NoError(t, err)
 	contentStr := string(content)
 
-	// Check for required sections
-	assert.Contains(t, contentStr, "version: \"1.0\"")
-	assert.Contains(t, contentStr, "defaults:")
-	assert.Contains(t, contentStr, "base_dir: ../worktrees")
+	// Check for required sections (hooks-only format — no version or defaults)
 	assert.Contains(t, contentStr, "hooks:")
 	assert.Contains(t, contentStr, "post_create:")
+	assert.NotContains(t, contentStr, "version:")
+	assert.NotContains(t, contentStr, "defaults:")
+	assert.NotContains(t, contentStr, "base_dir:")
 
-	// Check for example hooks
-	assert.Contains(t, contentStr, "type: copy")
-	assert.Contains(t, contentStr, "from: .env")
-	assert.Contains(t, contentStr, "to: .env")
-	assert.Contains(t, contentStr, "type: command")
-	assert.Contains(t, contentStr, "command: wtp")
-	assert.Contains(t, contentStr, `command: wtp list`)
-
-	// Check for comments
-	assert.Contains(t, contentStr, "# Worktree Plus Configuration")
-	assert.Contains(t, contentStr, "# Default settings for worktrees")
-	assert.Contains(t, contentStr, "# Hooks that run after creating a worktree")
+	// Check for example hook comments
+	assert.Contains(t, contentStr, "# - type: copy")
+	assert.Contains(t, contentStr, "#   from: .env")
+	assert.Contains(t, contentStr, "#   to: .env")
+	assert.Contains(t, contentStr, "# - type: symlink")
+	assert.Contains(t, contentStr, "#   from: .bin")
+	assert.Contains(t, contentStr, "#   to: .bin")
+	assert.Contains(t, contentStr, "# - type: command")
+	assert.Contains(t, contentStr, "#   command: npm install")
 }
 
 func TestInitCommand_DirectoryAccessError(t *testing.T) {
