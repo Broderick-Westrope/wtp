@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -13,6 +12,9 @@ import (
 
 	"github.com/satococoa/wtp/v2/internal/command"
 	"github.com/satococoa/wtp/v2/internal/config"
+	"github.com/satococoa/wtp/v2/internal/github"
+	"github.com/satococoa/wtp/v2/internal/remote"
+	"github.com/satococoa/wtp/v2/internal/state"
 )
 
 func defaultListDisplayOptionsForTests() listDisplayOptions {
@@ -22,21 +24,28 @@ func defaultListDisplayOptionsForTests() listDisplayOptions {
 	}
 }
 
-func extractPathColumnWidth(t *testing.T, output string) int {
+// extractBranchColumnWidth measures the BRANCH column width from list output.
+// The BRANCH column is first; its width is determined by where the two-space separator
+// before HEAD (last column) occurs. Works for both gh and no-gh formats.
+func extractBranchColumnWidth(t *testing.T, output string) int {
 	t.Helper()
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	if len(lines) == 0 {
 		t.Fatalf("no output produced")
 	}
 	header := lines[0]
-	idx := strings.Index(header, "BRANCH")
-	if idx == -1 {
-		t.Fatalf("BRANCH column missing in header: %q", header)
+	if !strings.HasPrefix(header, "BRANCH") {
+		t.Fatalf("BRANCH not first column in header: %q", header)
 	}
-	if idx == 0 {
-		return 0
+	// Find HEAD which is always the last column
+	headIdx := strings.LastIndex(header, "HEAD")
+	if headIdx == -1 {
+		t.Fatalf("HEAD column missing in header: %q", header)
 	}
-	return idx - 1
+	// Branch column width = headIdx - 2 (two-space separator before HEAD)
+	// when no gh columns in between, HEAD follows directly after BRANCH.
+	// For no-gh: "%-bw*s  HEAD" → headIdx - 2 = bw
+	return headIdx - 2
 }
 
 // ===== Command Structure Tests =====
@@ -51,12 +60,23 @@ func TestNewListCommand(t *testing.T) {
 	assert.NotEmpty(t, cmd.Description)
 	assert.NotNil(t, cmd.Action)
 	assert.NotNil(t, cmd.ShellComplete)
+
+	// Check new flags exist
+	flagNames := make(map[string]bool)
+	for _, flag := range cmd.Flags {
+		for _, name := range flag.Names() {
+			flagNames[name] = true
+		}
+	}
+	assert.True(t, flagNames["all"], "should have --all flag")
+	assert.True(t, flagNames["no-sync"], "should have --no-sync flag")
+	assert.True(t, flagNames["quiet"], "should have --quiet flag")
+	assert.True(t, flagNames["compact"], "should have --compact flag")
 }
 
 // ===== Pure Business Logic Tests =====
 
 func TestDisplayConstants(t *testing.T) {
-	assert.Equal(t, 4, pathHeaderDashes)
 	assert.Equal(t, 6, branchHeaderDashes)
 	assert.Equal(t, 8, headDisplayLength)
 }
@@ -83,19 +103,10 @@ func TestWorktreeFormatting(t *testing.T) {
 			head:           "efgh5678",
 			expectedFormat: "/very/long/path/to/worktree/that/might/need/truncation",
 		},
-		{
-			name:           "short head",
-			path:           "/path",
-			branch:         "main",
-			head:           "abc123",
-			expectedFormat: "/path",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Test that formatting doesn't break with various inputs
-			// The actual formatting logic can be tested here if needed
 			assert.NotEmpty(t, tt.path)
 			assert.NotEmpty(t, tt.branch)
 			assert.NotEmpty(t, tt.head)
@@ -123,6 +134,10 @@ func TestListCommand_CommandConstruction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			oldIsGH := listIsGHAvailable
+			listIsGHAvailable = func() bool { return false }
+			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 			mockExec := &mockListCommandExecutor{
 				results: []command.Result{
 					{
@@ -135,21 +150,18 @@ func TestListCommand_CommandConstruction(t *testing.T) {
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{
-				
-			}
+			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				cmd,
 				&buf,
 				mockExec,
 				cfg,
 				"/test/repo",
-				false,
+				false, false, false,
 				defaultListDisplayOptionsForTests(),
 			)
 
 			assert.NoError(t, err)
-			// Verify the correct git command was executed
 			assert.Equal(t, tt.expectedCommands, mockExec.executedCommands)
 		})
 	}
@@ -165,11 +177,9 @@ func TestListCommand_Output(t *testing.T) {
 			name:       "single worktree",
 			mockOutput: "worktree /path/to/worktree\nHEAD abc123\nbranch refs/heads/main\n\n",
 			expectedOutput: []string{
-				"PATH",
 				"BRANCH",
 				"HEAD",
 				"@", // Main worktree always shows as @
-				"main",
 				"abc123",
 			},
 		},
@@ -178,27 +188,25 @@ func TestListCommand_Output(t *testing.T) {
 			mockOutput: "worktree /path/to/main\nHEAD abc123\nbranch refs/heads/main\n\n" +
 				"worktree /path/to/feature\nHEAD def456\nbranch refs/heads/feature/test\n\n",
 			expectedOutput: []string{
-				"PATH",
 				"BRANCH",
 				"HEAD",
 				"@",
-				"main",
-				"feature", // Relative path from current directory
-				"feature/test",
+				"feature/test", // Branch name in BRANCH column (main shows as @, not "main")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Mock current directory as /path/to
+			oldIsGH := listIsGHAvailable
+			listIsGHAvailable = func() bool { return false }
+			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 			oldGetwd := listGetwd
 			listGetwd = func() (string, error) {
 				return "/path/to", nil
 			}
-			defer func() {
-				listGetwd = oldGetwd
-			}()
+			t.Cleanup(func() { listGetwd = oldGetwd })
 
 			mockExec := &mockListCommandExecutor{
 				results: []command.Result{
@@ -212,16 +220,14 @@ func TestListCommand_Output(t *testing.T) {
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{
-				
-			}
+			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				cmd,
 				&buf,
 				mockExec,
 				cfg,
 				"/test/repo",
-				false,
+				false, false, false,
 				defaultListDisplayOptionsForTests(),
 			)
 
@@ -230,6 +236,8 @@ func TestListCommand_Output(t *testing.T) {
 			for _, expected := range tt.expectedOutput {
 				assert.Contains(t, output, expected)
 			}
+			// Should NOT contain PATH column
+			assert.NotContains(t, output, "PATH")
 		})
 	}
 }
@@ -237,7 +245,6 @@ func TestListCommand_Output(t *testing.T) {
 // ===== Error Handling Tests =====
 
 func TestListCommand_NotInGitRepo(t *testing.T) {
-	// Create a temporary directory that is not a git repo
 	tempDir := t.TempDir()
 	oldDir, _ := os.Getwd()
 	defer func() { _ = os.Chdir(oldDir) }()
@@ -265,16 +272,14 @@ func TestListCommand_ExecutionError(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{
-		
-	}
+	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		false,
+		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 
@@ -295,22 +300,19 @@ func TestListCommand_NoWorktrees(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{
-		
-	}
+	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		false,
+		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 
 	assert.NoError(t, err)
 	output := buf.String()
-	// Should show "No worktrees found" message when no worktrees
 	assert.Contains(t, output, "No worktrees found")
 }
 
@@ -325,32 +327,35 @@ func TestListCommand_InternationalCharacters(t *testing.T) {
 		{
 			name:         "Japanese characters",
 			branchName:   "機能/ログイン",
-			worktreePath: "/path/to/worktrees/機能/ログイン",
+			worktreePath: "/path/to/feature/japanese",
 		},
 		{
 			name:         "Spanish accents",
 			branchName:   "función/añadir",
-			worktreePath: "/path/to/worktrees/función/añadir",
+			worktreePath: "/path/to/feature/spanish",
 		},
 		{
 			name:         "Emoji characters",
 			branchName:   "feature/🚀-rocket",
-			worktreePath: "/path/to/worktrees/feature/🚀-rocket",
+			worktreePath: "/path/to/feature/emoji",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Mock current directory
+			oldIsGH := listIsGHAvailable
+			listIsGHAvailable = func() bool { return false }
+			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 			oldGetwd := listGetwd
 			listGetwd = func() (string, error) {
 				return "/tmp", nil
 			}
-			defer func() {
-				listGetwd = oldGetwd
-			}()
+			t.Cleanup(func() { listGetwd = oldGetwd })
 
-			mockOutput := "worktree " + tt.worktreePath + "\nHEAD abc123\nbranch refs/heads/" + tt.branchName + "\n\n"
+			// Include main worktree + the unicode branch worktree
+			mockOutput := "worktree /path/to/main\nHEAD abc000\nbranch refs/heads/main\n\n" +
+				"worktree " + tt.worktreePath + "\nHEAD abc123\nbranch refs/heads/" + tt.branchName + "\n\n"
 
 			mockExec := &mockListCommandExecutor{
 				results: []command.Result{
@@ -364,69 +369,53 @@ func TestListCommand_InternationalCharacters(t *testing.T) {
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{
-				
-			}
+			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				cmd,
 				&buf,
 				mockExec,
 				cfg,
 				"/test/repo",
-				false,
+				false, false, false,
 				defaultListDisplayOptionsForTests(),
 			)
 
 			assert.NoError(t, err)
 			output := buf.String()
-			// Check that the branch name is displayed correctly
 			assert.Contains(t, output, tt.branchName)
-			// Main worktree should show as @
 			assert.Contains(t, output, "@")
 		})
 	}
 }
 
-func TestListCommand_LongPaths(t *testing.T) {
+func TestListCommand_LongBranchNames(t *testing.T) {
 	tests := []struct {
-		name string
-		path string
+		name       string
+		branchName string
 	}{
 		{
-			name: "very long path",
-			path: "/very/long/path/to/worktree/that/might/cause/display/issues/in/terminal/environments/with/limited/width",
+			name:       "very long branch name",
+			branchName: "feature/very-long-branch-name-that-might-cause-display-issues-in-terminal",
 		},
 		{
-			name: "path with spaces",
-			path: "/path/with spaces/in the/directory names",
-		},
-		{
-			name: "path with special characters",
-			path: "/path/with-special_characters.and.dots",
+			name:       "branch with slashes",
+			branchName: "feature/auth/oauth/google/callback",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Mock a wide terminal so paths aren't truncated
-			oldGetTerminalWidth := getTerminalWidth
-			getTerminalWidth = func() int {
-				return 200 // Wide enough to show full paths
-			}
-			defer func() {
-				getTerminalWidth = oldGetTerminalWidth
-			}()
+			oldIsGH := listIsGHAvailable
+			listIsGHAvailable = func() bool { return false }
+			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
-			// Mock current directory
 			oldGetwd := listGetwd
 			listGetwd = func() (string, error) {
 				return "/tmp", nil
 			}
-			defer func() {
-				listGetwd = oldGetwd
-			}()
+			t.Cleanup(func() { listGetwd = oldGetwd })
 
-			mockOutput := "worktree " + tt.path + "\nHEAD abc123\nbranch refs/heads/main\n\n"
+			mockOutput := "worktree /tmp/worktree\nHEAD abc123\nbranch refs/heads/" + tt.branchName + "\n\n"
 
 			mockExec := &mockListCommandExecutor{
 				results: []command.Result{
@@ -440,16 +429,14 @@ func TestListCommand_LongPaths(t *testing.T) {
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{
-				
-			}
+			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				cmd,
 				&buf,
 				mockExec,
 				cfg,
 				"/test/repo",
-				false,
+				false, false, false,
 				defaultListDisplayOptionsForTests(),
 			)
 
@@ -462,16 +449,16 @@ func TestListCommand_LongPaths(t *testing.T) {
 }
 
 func TestListCommand_MixedWorktreeStates(t *testing.T) {
-	// Mock current directory as /path/to
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 	oldGetwd := listGetwd
 	listGetwd = func() (string, error) {
 		return "/path/to", nil
 	}
-	defer func() {
-		listGetwd = oldGetwd
-	}()
+	t.Cleanup(func() { listGetwd = oldGetwd })
 
-	// Test with worktrees in different states (detached HEAD, etc.)
 	mockOutput := `worktree /path/to/main
 HEAD abc123
 branch refs/heads/main
@@ -498,33 +485,35 @@ branch refs/heads/feature/test
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{
-		
-	}
+	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		false,
+		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 
 	assert.NoError(t, err)
 	output := buf.String()
 
-	// Check that all worktrees are displayed
 	assert.Contains(t, output, "@")
-	assert.Contains(t, output, "detached")
 	assert.Contains(t, output, "feature")
-	assert.Contains(t, output, "main")
 	assert.Contains(t, output, "feature/test")
-	// Should show "(detached HEAD)" for detached HEAD
-	assert.Contains(t, output, "(detached HEAD)")
+	// Should show "(detached)" for detached HEAD (not "(detached HEAD)")
+	assert.Contains(t, output, "(detached)")
+	assert.NotContains(t, output, "(detached HEAD)")
+	// main worktree shows as @ not "main"
+	assert.NotContains(t, output, " main")
 }
 
 func TestListCommand_HeaderFormatting(t *testing.T) {
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 	mockExec := &mockListCommandExecutor{
 		results: []command.Result{
 			{
@@ -537,30 +526,28 @@ func TestListCommand_HeaderFormatting(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{
-		
-	}
+	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		false,
+		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 
 	assert.NoError(t, err)
 	output := buf.String()
 
-	// Check header formatting
 	lines := strings.Split(output, "\n")
 	assert.True(t, len(lines) >= 2, "Should have header and separator lines")
 
-	// Should contain header columns
-	assert.Contains(t, output, "PATH")
+	// New format: BRANCH and HEAD columns (no PATH, no STATUS)
 	assert.Contains(t, output, "BRANCH")
 	assert.Contains(t, output, "HEAD")
+	assert.NotContains(t, output, "PATH")
+	assert.NotContains(t, output, "STATUS")
 
 	// Should contain separator dashes
 	assert.Contains(t, output, "----")
@@ -608,7 +595,11 @@ func TestListCommand_DetachedHeadFormatting(t *testing.T) {
 	}{
 		{
 			name: "empty branch should show (no branch)",
-			mockOutput: `worktree /path/to/empty
+			mockOutput: `worktree /path/to/main
+HEAD abc000
+branch refs/heads/main
+
+worktree /path/to/empty
 HEAD abc123
 
 `,
@@ -616,18 +607,26 @@ HEAD abc123
 			description:    "Empty branch field should display as (no branch)",
 		},
 		{
-			name: "detached keyword should show (detached HEAD)",
-			mockOutput: `worktree /path/to/detached-head
+			name: "detached keyword should show (detached)",
+			mockOutput: `worktree /path/to/main
+HEAD abc000
+branch refs/heads/main
+
+worktree /path/to/detached-head
 HEAD def456
 detached
 
 `,
-			expectedBranch: "(detached HEAD)",
-			description:    "Detached keyword should display as (detached HEAD)",
+			expectedBranch: "(detached)",
+			description:    "Detached keyword should display as (detached)",
 		},
 		{
 			name: "normal branch should show as is",
-			mockOutput: `worktree /path/to/normal
+			mockOutput: `worktree /path/to/main
+HEAD abc000
+branch refs/heads/main
+
+worktree /path/to/normal
 HEAD ghi789
 branch refs/heads/feature/awesome
 
@@ -639,6 +638,10 @@ branch refs/heads/feature/awesome
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			oldIsGH := listIsGHAvailable
+			listIsGHAvailable = func() bool { return false }
+			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 			mockExec := &mockListCommandExecutor{
 				results: []command.Result{
 					{Output: tt.mockOutput, Error: nil},
@@ -648,16 +651,14 @@ branch refs/heads/feature/awesome
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{
-				
-			}
+			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				cmd,
 				&buf,
 				mockExec,
 				cfg,
 				"/repo",
-				false,
+				false, false, false,
 				defaultListDisplayOptionsForTests(),
 			)
 
@@ -676,7 +677,7 @@ func (e *mockError) Error() string {
 	return e.message
 }
 
-func TestListCommand_RelativePathDisplay(t *testing.T) {
+func TestListCommand_BranchDisplay(t *testing.T) {
 	tests := []struct {
 		name             string
 		mockOutput       string
@@ -698,13 +699,13 @@ branch refs/heads/feature/test
 			currentPath: "/Users/satoshi/dev/project/.worktrees/feature",
 			expectedContains: []string{
 				"@",
-				"feature",
-				"*", // Current worktree marker
+				"feature/test", // Branch name, not path
+				"*",            // Current worktree marker
 			},
 			description: "Main worktree should show as @ and current should have *",
 		},
 		{
-			name: "relative paths from parent directory",
+			name: "branch names in BRANCH column",
 			mockOutput: `worktree /Users/satoshi/dev/project
 HEAD abc123
 branch refs/heads/main
@@ -716,31 +717,13 @@ branch refs/heads/feature
 `,
 			currentPath: "/Users/satoshi/dev",
 			expectedContains: []string{
-				"project",
-				"project-feature",
+				"@",       // Main worktree
+				"feature", // Branch name (not path)
 			},
-			description: "Should show relative paths from current directory",
+			description: "Should show branch names, not directory paths",
 		},
 		{
-			name: "paths outside current directory tree",
-			mockOutput: `worktree /Users/satoshi/project1
-HEAD abc123
-branch refs/heads/main
-
-worktree /Users/alice/project2
-HEAD def456
-branch refs/heads/feature
-
-`,
-			currentPath: "/Users/satoshi/dev",
-			expectedContains: []string{
-				"@", // Main worktree always shows as @
-				"../../alice/project2",
-			},
-			description: "Should show relative paths with .. for outside paths",
-		},
-		{
-			name: "paths relative to main worktree when in subdirectory",
+			name: "multiple non-main worktrees show branch names",
 			mockOutput: `worktree /Users/satoshi/dev/src/github.com/satococoa/giselle
 HEAD 043130cca
 branch refs/heads/main
@@ -758,22 +741,23 @@ branch refs/heads/hoge
 			expectedContains: []string{
 				"@",
 				"foobar*", // Current worktree with marker
-				"hoge",    // Should be "hoge" not "../hoge" when paths are relative to base_dir
+				"hoge",
 			},
-			description: "Non-main worktrees should show paths relative to base_dir (.worktrees), not current directory",
+			description: "Non-main worktrees should show branch names",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Mock current directory
+			oldIsGH := listIsGHAvailable
+			listIsGHAvailable = func() bool { return false }
+			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 			oldGetwd := listGetwd
 			listGetwd = func() (string, error) {
 				return tt.currentPath, nil
 			}
-			defer func() {
-				listGetwd = oldGetwd
-			}()
+			t.Cleanup(func() { listGetwd = oldGetwd })
 
 			mockExec := &mockListCommandExecutor{
 				results: []command.Result{
@@ -784,35 +768,22 @@ branch refs/heads/hoge
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			// Extract main repo path from mock output
-			lines := strings.Split(tt.mockOutput, "\n")
-			mainRepoPath := "/Users/satoshi/dev/project" // default
-			if len(lines) > 0 && strings.HasPrefix(lines[0], "worktree ") {
-				mainRepoPath = strings.TrimPrefix(lines[0], "worktree ")
-			}
-
-			// Special handling for the base_dir test case (TODO: Phase 3 will rewrite list.go)
-			if tt.name == "paths relative to main worktree when in subdirectory" {
-				mainRepoPath = "/Users/satoshi/dev/src/github.com/satococoa/giselle"
-			}
-
 			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				cmd,
 				&buf,
 				mockExec,
 				cfg,
-				mainRepoPath,
-				false,
+				"/test/repo",
+				false, false, false,
 				defaultListDisplayOptionsForTests(),
 			)
 
 			assert.NoError(t, err, tt.description)
 			output := buf.String()
 
-			// Check expected content is present
 			for _, expected := range tt.expectedContains {
-				assert.Contains(t, output, expected, "Expected to find: %s", expected)
+				assert.Contains(t, output, expected, "Expected to find: %s in output: %s", expected, output)
 			}
 		})
 	}
@@ -820,15 +791,13 @@ branch refs/heads/hoge
 
 func TestListCommand_TerminalWidthTruncation(t *testing.T) {
 	tests := []struct {
-		name             string
-		mockOutput       string
-		terminalWidth    int
-		expectedContains []string
-		expectedNotFull  []string
-		description      string
+		name          string
+		mockOutput    string
+		terminalWidth int
+		description   string
 	}{
 		{
-			name: "truncate very long paths to fit terminal",
+			name: "output fits within terminal width",
 			mockOutput: `worktree /Users/satoshi/dev/src/github.com/giselles-ai/giselle
 HEAD 5d46cc7a
 branch refs/heads/add-github-pull-request-ingestion-table
@@ -838,44 +807,22 @@ HEAD 7c81ef4f
 branch refs/heads/stripe-basil-migration
 
 `,
-			terminalWidth:    80,
-			expectedContains: []string{"PATH", "BRANCH", "HEAD"},
-			expectedNotFull: []string{
-				"/Users/satoshi/dev/src/github.com/giselles-ai/giselle/.worktrees/stripe-basil-update",
-			},
-			description: "Long paths should be truncated when terminal width is limited",
-		},
-		{
-			name: "handle multiple long paths",
-			mockOutput: `worktree /very/long/path/that/exceeds/normal/terminal/width/and/should/be/truncated/somehow
-HEAD abc123
-branch refs/heads/main
-
-worktree /another/extremely/long/path/that/also/exceeds/terminal/width/limitations/feature
-HEAD def456
-branch refs/heads/feature/long-branch-name-that-might-also-be-truncated
-
-`,
-			terminalWidth:    100,
-			expectedContains: []string{"PATH", "BRANCH", "HEAD"},
-			expectedNotFull: []string{
-				"/very/long/path/that/exceeds/normal/terminal/width/and/should/be/truncated/somehow",
-				"/another/extremely/long/path/that/also/exceeds/terminal/width/limitations/feature",
-			},
-			description: "Multiple long paths should be handled gracefully",
+			terminalWidth: 80,
+			description:   "Output lines should not exceed terminal width",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Mock terminal width detection
+			oldIsGH := listIsGHAvailable
+			listIsGHAvailable = func() bool { return false }
+			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 			oldGetTerminalWidth := getTerminalWidth
 			getTerminalWidth = func() int {
 				return tt.terminalWidth
 			}
-			defer func() {
-				getTerminalWidth = oldGetTerminalWidth
-			}()
+			t.Cleanup(func() { getTerminalWidth = oldGetTerminalWidth })
 
 			mockExec := &mockListCommandExecutor{
 				results: []command.Result{
@@ -886,31 +833,22 @@ branch refs/heads/feature/long-branch-name-that-might-also-be-truncated
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{
-				
-			}
+			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				cmd,
 				&buf,
 				mockExec,
 				cfg,
 				"/repo",
-				false,
+				false, false, false,
 				defaultListDisplayOptionsForTests(),
 			)
 
 			assert.NoError(t, err, tt.description)
 			output := buf.String()
 
-			// Check expected content is present
-			for _, expected := range tt.expectedContains {
-				assert.Contains(t, output, expected)
-			}
-
-			// Check that long paths are truncated (not displayed in full)
-			for _, longPath := range tt.expectedNotFull {
-				assert.NotContains(t, output, longPath, "Long path should be truncated: %s", longPath)
-			}
+			assert.Contains(t, output, "BRANCH")
+			assert.Contains(t, output, "HEAD")
 
 			// Check that output fits within terminal width
 			lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -922,17 +860,20 @@ branch refs/heads/feature/long-branch-name-that-might-also-be-truncated
 	}
 }
 
-func TestListCommand_PathColumnCappedOnWideTerminals(t *testing.T) {
-	longName := strings.Repeat("verylongsegment", 5)
-	mockOutput := fmt.Sprintf(`worktree /test/repo
+func TestListCommand_BranchColumnCappedByMaxWidth(t *testing.T) {
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	mockOutput := `worktree /test/repo
 HEAD abc123
 branch refs/heads/main
 
-worktree /test/repo/.worktrees/%s
+worktree /test/repo/.worktrees/feature/very-long-branch-name-that-exceeds-max-width
 HEAD def456
-branch refs/heads/feature/long
+branch refs/heads/feature/very-long-branch-name-that-exceeds-max-width
 
-`, longName)
+`
 
 	oldGetTerminalWidth := getTerminalWidth
 	getTerminalWidth = func() int { return 150 }
@@ -946,22 +887,29 @@ branch refs/heads/feature/long
 	cmd := &cli.Command{}
 	cfg := &config.Config{}
 
+	opts := defaultListDisplayOptionsForTests()
+	opts.MaxPathWidth = 30
+
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		false,
-		defaultListDisplayOptionsForTests(),
+		false, false, false,
+		opts,
 	)
 	assert.NoError(t, err)
 
-	width := extractPathColumnWidth(t, buf.String())
-	assert.Equal(t, defaultMaxPathWidth, width)
+	width := extractBranchColumnWidth(t, buf.String())
+	assert.Equal(t, 30, width)
 }
 
 func TestListCommand_AutoCompactForSuperWideTerminals(t *testing.T) {
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 	mockOutput := `worktree /test/repo
 HEAD abc123
 branch refs/heads/main
@@ -990,16 +938,24 @@ branch refs/heads/feature/test
 		mockExec,
 		cfg,
 		"/test/repo",
-		false,
+		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 	assert.NoError(t, err)
 
-	width := extractPathColumnWidth(t, buf.String())
+	width := extractBranchColumnWidth(t, buf.String())
+	// Compact triggered at >= 160: branch width = max branch name length = len("feature/test") = 12
 	assert.Equal(t, len("feature/test"), width)
 }
 
-func TestListCommand_AutoCompactForNonTTY(t *testing.T) {
+// runCompactTest is a helper for compact mode tests that returns the branch column width.
+func runCompactTest(t *testing.T, opts listDisplayOptions) int {
+	t.Helper()
+
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
 	mockOutput := `worktree /test/repo
 HEAD abc123
 branch refs/heads/main
@@ -1022,105 +978,31 @@ branch refs/heads/feature/test
 	cmd := &cli.Command{}
 	cfg := &config.Config{}
 
-	opts := defaultListDisplayOptionsForTests()
-	opts.OutputIsTTY = false
-
 	err := listCommandWithCommandExecutor(
-		cmd,
-		&buf,
-		mockExec,
-		cfg,
-		"/test/repo",
-		false,
-		opts,
+		cmd, &buf, mockExec, cfg, "/test/repo",
+		false, false, false, opts,
 	)
 	assert.NoError(t, err)
 
-	width := extractPathColumnWidth(t, buf.String())
+	return extractBranchColumnWidth(t, buf.String())
+}
+
+func TestListCommand_AutoCompactForNonTTY(t *testing.T) {
+	opts := defaultListDisplayOptionsForTests()
+	opts.OutputIsTTY = false
+
+	width := runCompactTest(t, opts)
+	// Non-TTY triggers compact: branch width = max branch name = len("feature/test") = 12
 	assert.Equal(t, len("feature/test"), width)
 }
 
 func TestListCommand_CompactFlag(t *testing.T) {
-	mockOutput := `worktree /test/repo
-HEAD abc123
-branch refs/heads/main
-
-worktree /test/repo/.worktrees/feature/test
-HEAD def456
-branch refs/heads/feature/test
-
-`
-
-	oldGetTerminalWidth := getTerminalWidth
-	getTerminalWidth = func() int { return 120 }
-	t.Cleanup(func() { getTerminalWidth = oldGetTerminalWidth })
-
-	mockExec := &mockListCommandExecutor{
-		results: []command.Result{{Output: mockOutput, Error: nil}},
-	}
-
-	var buf bytes.Buffer
-	cmd := &cli.Command{}
-	cfg := &config.Config{}
-
 	opts := defaultListDisplayOptionsForTests()
 	opts.Compact = true
 
-	err := listCommandWithCommandExecutor(
-		cmd,
-		&buf,
-		mockExec,
-		cfg,
-		"/test/repo",
-		false,
-		opts,
-	)
-	assert.NoError(t, err)
-
-	width := extractPathColumnWidth(t, buf.String())
+	width := runCompactTest(t, opts)
+	// Compact: branch width = max branch name = len("feature/test") = 12
 	assert.Equal(t, len("feature/test"), width)
-}
-
-func TestListCommand_CustomMaxPathWidth(t *testing.T) {
-	longName := strings.Repeat("verylongsegment", 5)
-	mockOutput := fmt.Sprintf(`worktree /test/repo
-HEAD abc123
-branch refs/heads/main
-
-worktree /test/repo/.worktrees/%s
-HEAD def456
-branch refs/heads/feature/long
-
-`, longName)
-
-	oldGetTerminalWidth := getTerminalWidth
-	getTerminalWidth = func() int { return 150 }
-	t.Cleanup(func() { getTerminalWidth = oldGetTerminalWidth })
-
-	mockExec := &mockListCommandExecutor{
-		results: []command.Result{{Output: mockOutput, Error: nil}},
-	}
-
-	var buf bytes.Buffer
-	cmd := &cli.Command{}
-	cfg := &config.Config{}
-
-	opts := defaultListDisplayOptionsForTests()
-	opts.MaxPathWidth = 30
-
-	err := listCommandWithCommandExecutor(
-		cmd,
-		&buf,
-		mockExec,
-		cfg,
-		"/test/repo",
-		false,
-		opts,
-	)
-	assert.NoError(t, err)
-
-	width := extractPathColumnWidth(t, buf.String())
-	assert.Equal(t, 30, width)
 }
 
 // ===== Quiet Mode Tests =====
@@ -1138,16 +1020,14 @@ func TestListCommand_QuietMode_SingleWorktree(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{
-		
-	}
+	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		true,
+		true, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 
@@ -1156,7 +1036,6 @@ func TestListCommand_QuietMode_SingleWorktree(t *testing.T) {
 
 	// Should only contain the worktree name (@), nothing else
 	assert.Equal(t, "@\n", output)
-	// Should not contain headers
 	assert.NotContains(t, output, "PATH")
 	assert.NotContains(t, output, "BRANCH")
 	assert.NotContains(t, output, "HEAD")
@@ -1186,27 +1065,24 @@ branch refs/heads/feature/another
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{
-		
-	}
+	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		true,
+		true, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 
 	assert.NoError(t, err)
 	output := buf.String()
 
-	// Should contain all three worktree names, one per line
+	// Should contain all three worktree branch names, one per line
 	expectedOutput := "@\nfeature/test\nfeature/another\n"
 	assert.Equal(t, expectedOutput, output)
 
-	// Should not contain headers or formatting
 	assert.NotContains(t, output, "PATH")
 	assert.NotContains(t, output, "BRANCH")
 	assert.NotContains(t, output, "HEAD")
@@ -1226,22 +1102,19 @@ func TestListCommand_QuietMode_NoWorktrees(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{
-		
-	}
+	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		true,
+		true, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 
 	assert.NoError(t, err)
 	output := buf.String()
-	// Should produce no output in quiet mode when there are no worktrees
 	assert.Equal(t, "", output)
 	assert.NotContains(t, output, "No worktrees found")
 }
@@ -1266,26 +1139,24 @@ detached
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{
-		
-	}
+	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		cmd,
 		&buf,
 		mockExec,
 		cfg,
 		"/test/repo",
-		true,
+		true, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
 
 	assert.NoError(t, err)
 	output := buf.String()
 
-	// Should only contain worktree names, not branch state information
-	expectedOutput := "@\ndetached\n"
+	// Detached HEAD worktrees are OMITTED from quiet output
+	expectedOutput := "@\n"
 	assert.Equal(t, expectedOutput, output)
-	assert.NotContains(t, output, "detached HEAD")
+	assert.NotContains(t, output, "detached")
 	assert.NotContains(t, output, "BRANCH")
 	assert.NotContains(t, output, "HEAD")
 }
@@ -1305,4 +1176,408 @@ func TestCompleteList_SuggestsQuietFlag(t *testing.T) {
 
 		assert.Contains(t, buf.String(), "--quiet")
 	})
+}
+
+// ===== New Phase 3 Tests =====
+
+func TestListCommand_NoGH_NoPRCIColumns(t *testing.T) {
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	mockOutput := `worktree /test/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /test/repo/.worktrees/feature/auth
+HEAD def456
+branch refs/heads/feature/auth
+
+`
+
+	mockExec := &mockListCommandExecutor{
+		results: []command.Result{
+			{Output: mockOutput, Error: nil},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &cli.Command{}
+	cfg := &config.Config{}
+
+	err := listCommandWithCommandExecutor(
+		cmd, &buf, mockExec, cfg, "/test/repo",
+		false, false, false,
+		defaultListDisplayOptionsForTests(),
+	)
+
+	assert.NoError(t, err)
+	output := buf.String()
+
+	// No PR/CI columns when gh not available
+	assert.NotContains(t, output, " PR ")
+	assert.NotContains(t, output, " CI ")
+	// Branch and HEAD columns present
+	assert.Contains(t, output, "BRANCH")
+	assert.Contains(t, output, "HEAD")
+}
+
+func TestListCommand_AllShowsArchived(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataDir)
+
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	oldGetRemote := listGetRemoteURL
+	listGetRemoteURL = func(_ string) (string, error) {
+		return "https://github.com/owner/repo.git", nil
+	}
+	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
+
+	// Pre-archive feature/auth
+	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
+	stateStore := state.NewStore()
+	_ = stateStore.SetArchived(repoID.StateKey("feature/auth"), true)
+
+	mockOutput := `worktree /test/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /test/repo/.worktrees/feature/auth
+HEAD def456
+branch refs/heads/feature/auth
+
+worktree /test/repo/.worktrees/feature/other
+HEAD ghi789
+branch refs/heads/feature/other
+
+`
+
+	mockExec := &mockListCommandExecutor{
+		results: []command.Result{
+			{Output: mockOutput, Error: nil},
+		},
+	}
+
+	t.Run("without --all, archived hidden", func(t *testing.T) {
+		var buf bytes.Buffer
+		cmd := &cli.Command{}
+		cfg := &config.Config{}
+
+		err := listCommandWithCommandExecutor(
+			cmd, &buf, mockExec, cfg, "/test/repo",
+			false, false, false, // quiet=false, showAll=false, noSync=false
+			defaultListDisplayOptionsForTests(),
+		)
+		assert.NoError(t, err)
+		output := buf.String()
+		assert.NotContains(t, output, "feature/auth", "archived branch should be hidden")
+		assert.Contains(t, output, "feature/other")
+	})
+
+	t.Run("with --all, archived shown", func(t *testing.T) {
+		var buf bytes.Buffer
+		cmd := &cli.Command{}
+		cfg := &config.Config{}
+
+		err := listCommandWithCommandExecutor(
+			cmd, &buf, mockExec, cfg, "/test/repo",
+			false, true, false, // quiet=false, showAll=true, noSync=false
+			defaultListDisplayOptionsForTests(),
+		)
+		assert.NoError(t, err)
+		output := buf.String()
+		assert.Contains(t, output, "feature/auth", "archived branch should appear with --all")
+		assert.Contains(t, output, "(archived)", "should show (archived) marker")
+	})
+}
+
+func TestListCommand_NoSync_SkipsGHCalls(t *testing.T) {
+	ghCallCount := 0
+
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return true }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	oldGetPR := listGetPRForBranch
+	listGetPRForBranch = func(_ string) (*github.PRInfo, error) {
+		ghCallCount++
+		return nil, nil
+	}
+	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
+
+	oldGetCI := listGetCIStatus
+	listGetCIStatus = func(_ string) (*github.CIStatus, error) {
+		ghCallCount++
+		return nil, nil
+	}
+	t.Cleanup(func() { listGetCIStatus = oldGetCI })
+
+	mockOutput := `worktree /test/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /test/repo/.worktrees/feature/test
+HEAD def456
+branch refs/heads/feature/test
+
+`
+
+	mockExec := &mockListCommandExecutor{
+		results: []command.Result{
+			{Output: mockOutput, Error: nil},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &cli.Command{}
+	cfg := &config.Config{}
+
+	err := listCommandWithCommandExecutor(
+		cmd, &buf, mockExec, cfg, "/test/repo",
+		false, false, true, // noSync=true
+		defaultListDisplayOptionsForTests(),
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, ghCallCount, "gh calls should be skipped with --no-sync")
+}
+
+func TestListCommand_AutoArchiveMergedPR(t *testing.T) {
+	dataDir := t.TempDir()
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataDir)
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return true }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	oldGetRemote := listGetRemoteURL
+	listGetRemoteURL = func(_ string) (string, error) {
+		return "https://github.com/owner/repo.git", nil
+	}
+	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
+
+	oldGetPR := listGetPRForBranch
+	listGetPRForBranch = func(branch string) (*github.PRInfo, error) {
+		if branch == "feature/merged" {
+			return &github.PRInfo{Number: 42, State: "MERGED", Title: "Merged PR"}, nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
+
+	oldGetCI := listGetCIStatus
+	listGetCIStatus = func(_ string) (*github.CIStatus, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() { listGetCIStatus = oldGetCI })
+
+	mockOutput := `worktree /test/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /test/repo/.worktrees/feature/merged
+HEAD def456
+branch refs/heads/feature/merged
+
+`
+
+	mockExec := &mockListCommandExecutor{
+		results: []command.Result{
+			{Output: mockOutput, Error: nil},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &cli.Command{}
+	cfg := &config.Config{}
+
+	err := listCommandWithCommandExecutor(
+		cmd, &buf, mockExec, cfg, "/test/repo",
+		false, false, false,
+		defaultListDisplayOptionsForTests(),
+	)
+
+	assert.NoError(t, err)
+	output := buf.String()
+
+	// Auto-archive notice should be printed
+	assert.Contains(t, output, "Auto-archived feature/merged (PR #42 merged)")
+
+	// The merged branch should NOT appear as a table row (it was auto-archived, showAll=false)
+	// Split output: first line is auto-archive notice, rest is table
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	// Find the table section (after the auto-archive notice line)
+	var tableLines []string
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "Auto-archived") {
+			tableLines = append(tableLines, line)
+		}
+	}
+	tableOutput := strings.Join(tableLines, "\n")
+	assert.NotContains(t, tableOutput, "feature/merged", "merged branch should not appear in table")
+
+	// State should be updated
+	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
+	stateStore := state.NewStore()
+	assert.True(t, stateStore.IsArchived(repoID.StateKey("feature/merged")))
+}
+
+func TestListCommand_DetachedHeadWithMarker(t *testing.T) {
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	mockOutput := `worktree /test/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /test/repo/.worktrees/detached
+HEAD def456
+detached
+
+`
+
+	mockExec := &mockListCommandExecutor{
+		results: []command.Result{
+			{Output: mockOutput, Error: nil},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &cli.Command{}
+	cfg := &config.Config{}
+
+	err := listCommandWithCommandExecutor(
+		cmd, &buf, mockExec, cfg, "/test/repo",
+		false, false, false,
+		defaultListDisplayOptionsForTests(),
+	)
+
+	assert.NoError(t, err)
+	output := buf.String()
+
+	// Detached HEAD shows with (detached) marker, not (detached HEAD)
+	assert.Contains(t, output, "(detached)")
+	assert.NotContains(t, output, "(detached HEAD)")
+}
+
+func TestListCommand_QuietNoSyncSideEffectFree(t *testing.T) {
+	ghCallCount := 0
+
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return true }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	oldGetPR := listGetPRForBranch
+	listGetPRForBranch = func(_ string) (*github.PRInfo, error) {
+		ghCallCount++
+		return nil, nil
+	}
+	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
+
+	mockOutput := `worktree /test/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /test/repo/.worktrees/feature/test
+HEAD def456
+branch refs/heads/feature/test
+
+`
+
+	mockExec := &mockListCommandExecutor{
+		results: []command.Result{
+			{Output: mockOutput, Error: nil},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &cli.Command{}
+	cfg := &config.Config{}
+
+	err := listCommandWithCommandExecutor(
+		cmd, &buf, mockExec, cfg, "/test/repo",
+		true, false, true, // quiet=true, noSync=true
+		defaultListDisplayOptionsForTests(),
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 0, ghCallCount, "quiet+no-sync should make no gh calls")
+	output := buf.String()
+	// Quiet mode outputs branch names
+	assert.Equal(t, "@\nfeature/test\n", output)
+}
+
+func TestListCommand_WithGHColumns(t *testing.T) {
+	dataDir := t.TempDir()
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataDir)
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return true }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	oldGetRemote := listGetRemoteURL
+	listGetRemoteURL = func(_ string) (string, error) {
+		return "https://github.com/owner/repo.git", nil
+	}
+	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
+
+	oldGetPR := listGetPRForBranch
+	listGetPRForBranch = func(branch string) (*github.PRInfo, error) {
+		if branch == "feature/auth" {
+			return &github.PRInfo{Number: 42, State: "OPEN"}, nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
+
+	oldGetCI := listGetCIStatus
+	listGetCIStatus = func(_ string) (*github.CIStatus, error) {
+		if branch := "feature/auth"; branch == "feature/auth" {
+			return &github.CIStatus{State: "passing", Total: 3, Passing: 3}, nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { listGetCIStatus = oldGetCI })
+
+	mockOutput := `worktree /test/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /test/repo/.worktrees/feature/auth
+HEAD def456
+branch refs/heads/feature/auth
+
+`
+
+	mockExec := &mockListCommandExecutor{
+		results: []command.Result{
+			{Output: mockOutput, Error: nil},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &cli.Command{}
+	cfg := &config.Config{}
+
+	err := listCommandWithCommandExecutor(
+		cmd, &buf, mockExec, cfg, "/test/repo",
+		false, false, false,
+		defaultListDisplayOptionsForTests(),
+	)
+
+	assert.NoError(t, err)
+	output := buf.String()
+
+	// With gh: PR and CI columns present
+	assert.Contains(t, output, " PR ")
+	assert.Contains(t, output, " CI ")
+	assert.Contains(t, output, "#42")
 }
