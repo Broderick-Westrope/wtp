@@ -285,19 +285,7 @@ func fetchPRCIForBranch(
 ) error {
 	// Use cached data if fresh
 	if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
-		var toArchive *archiveRequest
-
-		shared.mu.Lock()
-		shared.prciData[wt.Branch] = prciFromCache(&cached)
-		if cached.PRState == github.StateMerged && !shared.archivedBranches[wt.Branch] {
-			shared.archivedBranches[wt.Branch] = true
-			toArchive = &archiveRequest{branch: wt.Branch, prNumber: cached.PRNumber}
-		}
-		shared.mu.Unlock()
-
-		if toArchive != nil {
-			autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
-		}
+		handleCachedPRCI(wt.Branch, &cached, repoID, stateStore, shared)
 		return nil
 	}
 
@@ -311,12 +299,54 @@ func fetchPRCIForBranch(
 		ci, ciErr = listGetCIStatus(ctx, wt.Branch)
 	}
 	if prErr != nil || ciErr != nil {
-		shared.errorCount.Add(1) // count branches (not individual calls) that had fetch errors
+		shared.errorCount.Add(1)
 	}
 
 	prFmt := github.FormatPRState(pr)
 	ciFmt := github.FormatCIStatus(ci)
 
+	toArchive := updateSharedWithFreshData(wt.Branch, key, pr, prErr, ciErr, prFmt, ciFmt, shared)
+
+	if toArchive != nil {
+		autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
+	}
+
+	return nil
+}
+
+// handleCachedPRCI updates shared state from a valid cache entry and triggers
+// auto-archive if the PR was merged. I/O happens outside the mutex.
+func handleCachedPRCI(
+	branch string,
+	cached *cache.WorktreeCache,
+	repoID *remote.RepoIdentifier,
+	stateStore *state.Store,
+	shared *prciSharedState,
+) {
+	var toArchive *archiveRequest
+
+	shared.mu.Lock()
+	shared.prciData[branch] = prciFromCache(cached)
+	if cached.PRState == github.StateMerged && !shared.archivedBranches[branch] {
+		shared.archivedBranches[branch] = true
+		toArchive = &archiveRequest{branch: branch, prNumber: cached.PRNumber}
+	}
+	shared.mu.Unlock()
+
+	if toArchive != nil {
+		autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
+	}
+}
+
+// updateSharedWithFreshData writes freshly-fetched PR/CI data into shared state
+// under the mutex. Returns an archiveRequest if the branch needs auto-archiving.
+func updateSharedWithFreshData(
+	branch, key string,
+	pr *github.PRInfo,
+	prErr, ciErr error,
+	prFmt, ciFmt string,
+	shared *prciSharedState,
+) *archiveRequest {
 	var toArchive *archiveRequest
 
 	shared.mu.Lock()
@@ -334,23 +364,19 @@ func fetchPRCIForBranch(
 		shared.newEntries[key] = entry
 	}
 
-	shared.prciData[wt.Branch] = worktreePRCI{
+	shared.prciData[branch] = worktreePRCI{
 		prFmt: prFmt,
 		ciFmt: ciFmt,
 	}
 
-	if pr != nil && pr.State == github.StateMerged && !shared.archivedBranches[wt.Branch] {
-		shared.archivedBranches[wt.Branch] = true
-		toArchive = &archiveRequest{branch: wt.Branch, prNumber: pr.Number}
+	if pr != nil && pr.State == github.StateMerged && !shared.archivedBranches[branch] {
+		shared.archivedBranches[branch] = true
+		toArchive = &archiveRequest{branch: branch, prNumber: pr.Number}
 	}
 
 	shared.mu.Unlock()
 
-	if toArchive != nil {
-		autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
-	}
-
-	return nil
+	return toArchive
 }
 
 // fetchPRCIData fetches PR/CI info for non-main non-detached worktrees, updating prciData and
