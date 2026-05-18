@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v2/internal/command"
-	"github.com/satococoa/wtp/v2/internal/config"
-	"github.com/satococoa/wtp/v2/internal/errors"
-	"github.com/satococoa/wtp/v2/internal/xdg"
+	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/satococoa/wtp/v3/internal/config"
+	"github.com/satococoa/wtp/v3/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
 // ===== Test helpers =====
@@ -365,12 +365,12 @@ func TestResolveWorktreePath(t *testing.T) {
 
 func TestAddCommand_CommandConstruction(t *testing.T) {
 	tests := []struct {
-		name             string
-		flags            map[string]any
-		args             []string
-		originURL        string
-		expectedSuffix   string // expected path suffix under XDG root
-		expectError      bool
+		name           string
+		flags          map[string]any
+		args           []string
+		originURL      string
+		expectedSuffix string // expected path suffix under XDG root
+		expectError    bool
 	}{
 		{
 			name: "basic worktree creation with -b",

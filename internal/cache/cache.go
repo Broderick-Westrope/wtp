@@ -12,7 +12,7 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"github.com/satococoa/wtp/v2/internal/xdg"
+	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
 // Store holds the paths used to persist and lock the cache file.

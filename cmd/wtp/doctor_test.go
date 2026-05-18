@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/satococoa/wtp/v2/internal/git"
-	"github.com/satococoa/wtp/v2/internal/remote"
-	"github.com/satococoa/wtp/v2/internal/state"
+	"github.com/satococoa/wtp/v3/internal/git"
+	"github.com/satococoa/wtp/v3/internal/remote"
+	"github.com/satococoa/wtp/v3/internal/state"
 )
 
 // ===== Command Structure Tests =====

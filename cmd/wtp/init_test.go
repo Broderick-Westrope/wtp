@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v2/internal/config"
+	"github.com/satococoa/wtp/v3/internal/config"
 )
 
 func TestNewInitCommand(t *testing.T) {

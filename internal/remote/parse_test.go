@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/satococoa/wtp/v2/internal/remote"
+	"github.com/satococoa/wtp/v3/internal/remote"
 )
 
 func TestParse(t *testing.T) {
@@ -158,10 +158,10 @@ func TestParseStateKey(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		key         string
-		wantRepo    string
-		wantBranch  string
+		name       string
+		key        string
+		wantRepo   string
+		wantBranch string
 	}{
 		{
 			name:       "simple branch",

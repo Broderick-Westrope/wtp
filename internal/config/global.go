@@ -8,7 +8,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/satococoa/wtp/v2/internal/xdg"
+	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
 const (

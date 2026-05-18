@@ -15,14 +15,14 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/satococoa/wtp/v2/internal/command"
-	"github.com/satococoa/wtp/v2/internal/config"
-	"github.com/satococoa/wtp/v2/internal/errors"
-	"github.com/satococoa/wtp/v2/internal/git"
-	"github.com/satococoa/wtp/v2/internal/hooks"
-	wtpio "github.com/satococoa/wtp/v2/internal/io"
-	"github.com/satococoa/wtp/v2/internal/remote"
-	"github.com/satococoa/wtp/v2/internal/xdg"
+	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/satococoa/wtp/v3/internal/config"
+	"github.com/satococoa/wtp/v3/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/git"
+	"github.com/satococoa/wtp/v3/internal/hooks"
+	wtpio "github.com/satococoa/wtp/v3/internal/io"
+	"github.com/satococoa/wtp/v3/internal/remote"
+	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
 // NewAddCommand creates the add command definition

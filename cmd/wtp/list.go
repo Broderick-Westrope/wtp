@@ -12,15 +12,15 @@ import (
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"
 
-	"github.com/satococoa/wtp/v2/internal/cache"
-	"github.com/satococoa/wtp/v2/internal/command"
-	"github.com/satococoa/wtp/v2/internal/config"
-	"github.com/satococoa/wtp/v2/internal/errors"
-	"github.com/satococoa/wtp/v2/internal/git"
-	"github.com/satococoa/wtp/v2/internal/github"
-	"github.com/satococoa/wtp/v2/internal/remote"
-	"github.com/satococoa/wtp/v2/internal/state"
-	"github.com/satococoa/wtp/v2/internal/xdg"
+	"github.com/satococoa/wtp/v3/internal/cache"
+	"github.com/satococoa/wtp/v3/internal/command"
+	"github.com/satococoa/wtp/v3/internal/config"
+	"github.com/satococoa/wtp/v3/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/git"
+	"github.com/satococoa/wtp/v3/internal/github"
+	"github.com/satococoa/wtp/v3/internal/remote"
+	"github.com/satococoa/wtp/v3/internal/state"
+	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
 // Display constants

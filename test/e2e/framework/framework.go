@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/satococoa/wtp/v2/internal/testutil"
+	"github.com/satococoa/wtp/v3/internal/testutil"
 )
 
 const (

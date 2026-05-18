@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	cmdTimeout = 10 * time.Second
+	cmdTimeout  = 10 * time.Second
 	stateReady  = "OPEN"
 	stateDraft  = "DRAFT"
 	stateMerged = "MERGED"

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/satococoa/wtp/v2/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/errors"
 )
 
 // Repository represents a git repository and offers helper methods for worktree operations.
