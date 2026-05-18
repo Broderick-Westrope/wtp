@@ -138,26 +138,25 @@ func TestWorktreeRemoval(t *testing.T) {
 		framework.AssertOutputContains(t, output, "Removed worktree")
 	})
 
-	t.Run("RemoveOnlyWorksWithinBaseDir", func(t *testing.T) {
-		repo := env.CreateTestRepo("remove-different-basedir")
+	t.Run("RemoveFromCentralizedStorage", func(t *testing.T) {
+		repo := env.CreateTestRepo("remove-centralized")
+		repo.CreateBranch("feature/centralized")
 
-		// Create worktree with default location
-		env.RunInDir(repo.Path(), "git", "worktree", "add", "../worktrees/feature/remove-test", "-b", "feature/remove-test")
+		// Create worktree (stored in XDG centralized path)
+		_, err := repo.RunWTP("add", "feature/centralized")
+		framework.AssertNoError(t, err)
 
-		// Create config with different base_dir
-		configContent := `version: 1
-defaults:
-  base_dir: custom-location`
-		env.WriteFile(repo.Path()+"/.wtp.yml", configContent)
+		// Verify it was created in centralized storage
+		centralPath := repo.CentralizedWorktreePath("feature/centralized")
+		framework.AssertTrue(t, env.FileExists(centralPath), "Worktree should exist in centralized storage")
 
-		// Remove should NOT work because worktree is outside the configured base_dir
-		output, err := repo.RunWTP("remove", "remove-test")
-		framework.AssertError(t, err)
-		framework.AssertOutputContains(t, output, "not found")
+		// Remove via branch name
+		output, err := repo.RunWTP("remove", "feature/centralized")
+		framework.AssertNoError(t, err)
+		framework.AssertOutputContains(t, output, "Removed worktree")
 
-		// Verify worktree is still there since remove failed
-		worktreePath := env.TmpDir() + "/worktrees/feature/remove-test"
-		framework.AssertTrue(t, env.FileExists(worktreePath), "Worktree should still exist")
+		// Verify the centralized directory was cleaned up
+		framework.AssertFalse(t, env.FileExists(centralPath), "Centralized worktree directory should be removed")
 	})
 }
 
@@ -245,23 +244,27 @@ func TestWorktreeWithConfig(t *testing.T) {
 	env := framework.NewTestEnvironment(t)
 	defer env.Cleanup()
 
-	t.Run("CustomBaseDir", func(t *testing.T) {
+	t.Run("BaseDirIgnoredInV3", func(t *testing.T) {
 		repo := env.CreateTestRepo("config-basedir")
 
-		// Create config with custom base_dir
+		// In v3, base_dir is silently ignored; worktrees go to centralized XDG storage.
 		configContent := `version: "1.0"
 defaults:
   base_dir: custom-worktrees`
 		env.WriteFile(repo.Path()+"/.wtp.yml", configContent)
 
-		// Create worktree with config
 		output, err := repo.RunWTP("add", "-b", "feature/custom-dir")
 		framework.AssertNoError(t, err)
 
-		// Check if worktree was created in custom base_dir
-		customPath := repo.Path() + "/custom-worktrees/feature/custom-dir"
-		framework.AssertTrue(t, env.FileExists(customPath+"/.git"), "Worktree .git should exist")
-		framework.AssertOutputContains(t, output, "custom-worktrees/feature/custom-dir")
+		// Worktree should be in centralized XDG storage, NOT in the legacy custom base_dir.
+		centralPath := repo.CentralizedWorktreePath("feature/custom-dir")
+		framework.AssertTrue(t, env.FileExists(centralPath+"/.git"), "Worktree .git should exist in centralized storage")
+
+		// The old custom-worktrees path should NOT have been created.
+		legacyPath := repo.Path() + "/custom-worktrees/feature/custom-dir"
+		framework.AssertFalse(t, env.FileExists(legacyPath), "Legacy base_dir path should NOT exist in v3")
+
+		framework.AssertOutputContains(t, output, "feature/custom-dir")
 	})
 
 	t.Run("PostCreateHook", func(t *testing.T) {
@@ -270,11 +273,8 @@ defaults:
 		// Create source file for copy hook
 		env.WriteFile(repo.Path()+"/template.txt", "template content")
 
-		// Create config with hooks
-		configContent := `version: "1.0"
-defaults:
-  base_dir: ../worktrees
-hooks:
+		// In v3 the config is hooks-only; version/base_dir are silently ignored.
+		configContent := `hooks:
   post_create:
     - type: copy
       from: template.txt
@@ -287,8 +287,8 @@ hooks:
 		output, err := repo.RunWTP("add", "-b", "feature/hooks")
 		framework.AssertNoError(t, err)
 
-		// Verify hooks were executed
-		worktreePath := env.TmpDir() + "/worktrees/feature/hooks"
+		// Worktree is now in centralized XDG storage.
+		worktreePath := repo.CentralizedWorktreePath("feature/hooks")
 		framework.AssertTrue(t, env.FileExists(worktreePath+"/copied.txt"), "Copied file should exist")
 		framework.AssertTrue(t, env.FileExists(worktreePath+"/hook-executed.txt"), "Hook-executed file should exist")
 		framework.AssertOutputContains(t, output, "Executing post-create hooks")

@@ -16,9 +16,8 @@ func TestHookOutputStreaming(t *testing.T) {
 
 	repo := env.CreateTestRepo("hook-streaming")
 
-	// Create config with a hook that outputs with delays
+	// In v3 the config is hooks-only (no version field).
 	config := map[string]any{
-		"version": "1",
 		"hooks": map[string]any{
 			"post_create": []map[string]any{
 				{
@@ -46,7 +45,7 @@ func TestHookOutputStreaming(t *testing.T) {
 	framework.AssertOutputContains(t, output, "Completed!")
 	framework.AssertOutputContains(t, output, "✓ All hooks executed successfully")
 
-	// Verify worktree was created (default location is ../worktrees/branch-name)
-	worktreePath := filepath.Join(repo.Path(), "..", "worktrees", "test-branch")
+	// In v3 worktrees are stored in centralized XDG storage.
+	worktreePath := repo.CentralizedWorktreePath("test-branch")
 	framework.AssertWorktreeExists(t, repo, worktreePath)
 }
