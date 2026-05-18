@@ -234,6 +234,8 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 		if !opts.OutputIsTTY {
 			opts.Compact = true
 		} else if termWidth >= superWideThreshold {
+			// On super-wide terminals (>=160 cols), enable compact mode to prevent
+			// comically wide BRANCH columns that waste horizontal space.
 			opts.Compact = true
 		}
 	}
