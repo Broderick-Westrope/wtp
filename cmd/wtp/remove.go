@@ -232,9 +232,9 @@ func cleanupCentralizedWorktreeDir(worktreePath string) {
 		return
 	}
 
-	// Only clean up paths inside centralized storage.
+	// Only clean up strict subdirectories of the storage root.
 	prefix := absRoot + string(os.PathSeparator)
-	if absPath != absRoot && !strings.HasPrefix(absPath, prefix) {
+	if !strings.HasPrefix(absPath, prefix) {
 		return
 	}
 
