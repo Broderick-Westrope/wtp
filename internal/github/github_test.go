@@ -1,6 +1,7 @@
 package github_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -155,7 +156,7 @@ func TestGetPRForBranch_ghNotAvailable(t *testing.T) {
 		t.Skip("gh CLI is installed; skipping unavailability test")
 	}
 
-	pr, err := github.GetPRForBranch("some-branch")
+	pr, err := github.GetPRForBranch(context.Background(), "some-branch")
 	// Without gh we expect an error (exec: not found), not a nil PR.
 	assert.Nil(t, pr)
 	assert.Error(t, err)
@@ -167,7 +168,7 @@ func TestGetCIStatus_ghNotAvailable(t *testing.T) {
 		t.Skip("gh CLI is installed; skipping unavailability test")
 	}
 
-	ci, err := github.GetCIStatus("some-branch")
+	ci, err := github.GetCIStatus(context.Background(), "some-branch")
 	assert.Nil(t, ci)
 	assert.Error(t, err)
 }

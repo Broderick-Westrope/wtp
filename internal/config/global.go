@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,7 +81,7 @@ func LoadGlobalConfig() (GlobalConfig, error) {
 	path := globalConfigPath()
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is derived from XDG env / home dir
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return GlobalConfig{CacheTTL: DefaultCacheTTL}, nil
 	}
 
@@ -133,7 +134,7 @@ func SaveGlobalConfig(cfg GlobalConfig) error {
 func EnsureGlobalConfig() (GlobalConfig, error) {
 	path := globalConfigPath()
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		defaults := GlobalConfig{CacheTTL: DefaultCacheTTL}
 		if saveErr := SaveGlobalConfig(defaults); saveErr != nil {
 			return GlobalConfig{}, fmt.Errorf("failed to create default global config: %w", saveErr)

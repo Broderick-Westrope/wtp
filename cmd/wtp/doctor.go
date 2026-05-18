@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"os"
@@ -82,7 +83,7 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 			repoID = &id
 		}
 	}
-	issueCount += checkOrphanedStateEntries(w, repoID, registeredPaths)
+	issueCount += checkOrphanedStateEntries(w, repoID)
 
 	// 3. Orphaned centralized directories
 	issueCount += checkOrphanedCentralizedDirs(w, registeredPaths)
@@ -151,8 +152,9 @@ func isV2WorktreePath(absPath, relPath string) bool {
 }
 
 // checkOrphanedStateEntries finds state entries with no matching on-disk worktree.
+// This check only works for centralized worktrees stored under WorktreeStorageRoot().
 // Returns number of issues found.
-func checkOrphanedStateEntries(w io.Writer, repoID *remote.RepoIdentifier, registeredPaths map[string]bool) int {
+func checkOrphanedStateEntries(w io.Writer, repoID *remote.RepoIdentifier) int {
 	if repoID == nil {
 		return 0
 	}
@@ -165,36 +167,21 @@ func checkOrphanedStateEntries(w io.Writer, repoID *remote.RepoIdentifier, regis
 
 	count := 0
 	for key := range st.Worktrees {
+		// Skip entries belonging to a different repo.
+		if !strings.HasPrefix(key, repoID.StoragePath()) {
+			continue
+		}
+
 		_, branch := remote.ParseStateKey(key)
 		if branch == "" {
 			continue
 		}
 
-		// Check if any registered worktree has this branch
-		found := false
-		for path := range registeredPaths {
-			// Check if path exists on disk
-			if _, err := os.Stat(path); err == nil {
-				found = true
-				break
-			}
-		}
-		// Also check worktrees with this branch (via key matching)
-		_ = found // We check via the key prefix matching repoID
-
-		// More precise: check if repoID matches and branch exists in registered paths
-		if !strings.HasPrefix(key, repoID.StoragePath()) {
-			continue // key belongs to a different repo
-		}
-
-		// Check if any registered path is a worktree with this branch
-		_, _ = w, branch
-		// Since we can't map key→path directly without worktrees list,
-		// just check if there's a disk path for the centralized store
+		// Check if the centralized worktree directory exists on disk.
 		centralPath := filepath.Join(xdg.WorktreeStorageRoot(), repoID.StoragePath(), branch)
-		if _, err := os.Stat(centralPath); os.IsNotExist(err) {
+		if _, err := os.Stat(centralPath); stderrors.Is(err, os.ErrNotExist) {
 			_, _ = fmt.Fprintf(w, "⚠ Orphaned state entry: %s (worktree not found on disk)\n", key)
-			_, _ = fmt.Fprintln(w, "  Run: wtp doctor --fix to clean up (future enhancement)")
+			_, _ = fmt.Fprintln(w, "  Remove this entry manually from state.json")
 			count++
 		}
 	}
@@ -205,7 +192,7 @@ func checkOrphanedStateEntries(w io.Writer, repoID *remote.RepoIdentifier, regis
 // Returns number of issues found.
 func checkOrphanedCentralizedDirs(w io.Writer, registeredPaths map[string]bool) int {
 	storageRoot := xdg.WorktreeStorageRoot()
-	if _, err := os.Stat(storageRoot); os.IsNotExist(err) {
+	if _, err := os.Stat(storageRoot); stderrors.Is(err, os.ErrNotExist) {
 		return 0 // no centralized storage yet
 	}
 

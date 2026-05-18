@@ -86,11 +86,11 @@ func IsAuthenticated() (bool, error) {
 
 // GetPRForBranch fetches pull request metadata for the given branch.
 // Returns (nil, nil) if no PR exists for the branch.
-func GetPRForBranch(branch string) (*PRInfo, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+func GetPRForBranch(ctx context.Context, branch string) (*PRInfo, error) {
+	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view", branch,
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", "--", branch,
 		"--json", "number,state,title,headRefName,isDraft")
 
 	var stdout, stderr bytes.Buffer
@@ -132,11 +132,11 @@ func GetPRForBranch(branch string) (*PRInfo, error) {
 
 // GetCIStatus fetches aggregated CI check status for the given branch.
 // Returns (nil, nil) if there is no PR or no checks are present.
-func GetCIStatus(branch string) (*CIStatus, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+func GetCIStatus(ctx context.Context, branch string) (*CIStatus, error) {
+	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "pr", "checks", branch,
+	cmd := exec.CommandContext(ctx, "gh", "pr", "checks", "--", branch,
 		"--json", "name,state")
 
 	var stdout, stderr bytes.Buffer

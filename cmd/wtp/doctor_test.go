@@ -64,13 +64,8 @@ func TestDoctor_CheckOrphanedStateEntries_Clean(t *testing.T) {
 
 	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
 
-	// Registered paths — no state entries exist
-	registeredPaths := map[string]bool{
-		"/repo": true,
-	}
-
 	var buf bytes.Buffer
-	count := checkOrphanedStateEntries(&buf, &repoID, registeredPaths)
+	count := checkOrphanedStateEntries(&buf, &repoID)
 
 	assert.Equal(t, 0, count)
 }
@@ -91,12 +86,8 @@ func TestDoctor_CheckOrphanedStateEntries_DetectsOrphaned(t *testing.T) {
 	require.NoError(t, stateStore.SetArchived(repoID.StateKey("feature/orphaned"), true))
 
 	// No worktree on disk for feature/orphaned
-	registeredPaths := map[string]bool{
-		"/repo": true,
-	}
-
 	var buf bytes.Buffer
-	count := checkOrphanedStateEntries(&buf, &repoID, registeredPaths)
+	count := checkOrphanedStateEntries(&buf, &repoID)
 
 	assert.Greater(t, count, 0, "should detect orphaned state entry")
 	assert.Contains(t, buf.String(), "⚠")
@@ -104,7 +95,7 @@ func TestDoctor_CheckOrphanedStateEntries_DetectsOrphaned(t *testing.T) {
 
 func TestDoctor_CheckOrphanedStateEntries_NilRepoID(t *testing.T) {
 	var buf bytes.Buffer
-	count := checkOrphanedStateEntries(&buf, nil, map[string]bool{})
+	count := checkOrphanedStateEntries(&buf, nil)
 
 	assert.Equal(t, 0, count, "should skip check when repoID is nil")
 }

@@ -106,6 +106,11 @@ func addCommandWithCommandExecutor(
 		return err
 	}
 
+	// Ensure the parent directory exists in centralized storage (after all validation passes).
+	if ensureDirErr := xdg.EnsureDir(filepath.Dir(workTreePath)); ensureDirErr != nil {
+		return ensureDirErr
+	}
+
 	// Build git worktree command using the new command builder
 	worktreeCmd := buildWorktreeCommand(cmd, workTreePath, branchName, resolvedTrack)
 
@@ -442,10 +447,9 @@ func setupRepoAndConfig() (*git.Repository, *config.Config, string, error) {
 		mainRepoPath = repo.Path()
 	}
 
-	// Ensure global config exists on first run.
+	// Ensure global config exists on first run (non-fatal).
 	if _, ensureErr := config.EnsureGlobalConfig(); ensureErr != nil {
-		// Non-fatal: log but continue.
-		_ = ensureErr
+		_, _ = fmt.Fprintf(os.Stderr, "warning: failed to create global config: %v\n", ensureErr)
 	}
 
 	cfg, err := config.LoadConfig(mainRepoPath)
@@ -626,12 +630,8 @@ func resolveWorktreePath(
 		)
 	}
 
-	// Compute parent directory and ensure it exists.
+	// Compute parent directory.
 	parentDir := filepath.Join(xdg.WorktreeStorageRoot(), repoID.StoragePath())
-	if ensureErr := xdg.EnsureDir(parentDir); ensureErr != nil {
-		return "", branchName, ensureErr
-	}
-
 	workTreePath = filepath.Join(parentDir, branchName)
 	return workTreePath, branchName, nil
 }

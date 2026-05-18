@@ -86,9 +86,10 @@ func NewListCommand() *cli.Command {
 				Usage:   "Minimize column widths for narrow or redirected output",
 			},
 			&cli.IntFlag{
-				Name:  "max-path-width",
-				Usage: fmt.Sprintf("Maximum width for BRANCH column (default %d)", defaultMaxPathWidth),
-				Value: defaultMaxPathWidth,
+				Name:    "max-branch-width",
+				Aliases: []string{"max-path-width"}, // max-path-width kept as backward-compat alias
+				Usage:   fmt.Sprintf("Maximum width for BRANCH column (default %d)", defaultMaxPathWidth),
+				Value:   defaultMaxPathWidth,
 			},
 			&cli.BoolFlag{
 				Name:    "quiet",
@@ -108,7 +109,7 @@ func NewListCommand() *cli.Command {
 	}
 }
 
-func listCommand(_ context.Context, cmd *cli.Command) error {
+func listCommand(ctx context.Context, cmd *cli.Command) error {
 	cwd, err := listGetwd()
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
@@ -137,11 +138,11 @@ func listCommand(_ context.Context, cmd *cli.Command) error {
 	noSync := cmd.Bool("no-sync")
 
 	executor := listNewExecutor()
-	return listCommandWithCommandExecutor(cmd, w, executor, cfg, mainRepoPath, quiet, showAll, noSync, opts)
+	return listCommandWithCommandExecutor(ctx, cmd, w, executor, cfg, mainRepoPath, quiet, showAll, noSync, opts)
 }
 
 func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many distinct display paths
-	_ *cli.Command, w io.Writer, executor command.Executor, _ *config.Config, mainRepoPath string,
+	ctx context.Context, _ *cli.Command, w io.Writer, executor command.Executor, _ *config.Config, mainRepoPath string,
 	quiet, showAll, noSync bool,
 	opts listDisplayOptions,
 ) error {
@@ -206,13 +207,13 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	ghAvailable := listIsGHAvailable()
 
 	if ghAvailable && !noSync && !quiet && repoID != nil {
-		if err := fetchPRCIData(w, displayWorktrees, repoID, stateStore, archivedBranches, prciData); err != nil {
+		if err := fetchPRCIData(ctx, w, displayWorktrees, repoID, stateStore, archivedBranches, prciData); err != nil {
 			return err
 		}
 
 		// Rebuild displayWorktrees after auto-archiving (unless --all)
 		if !showAll {
-			remaining := displayWorktrees[:0]
+			remaining := make([]git.Worktree, 0, len(displayWorktrees))
 			for _, wt := range displayWorktrees {
 				if !archivedBranches[wt.Branch] {
 					remaining = append(remaining, wt)
@@ -240,9 +241,27 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	return displayWorktreesTable(w, displayWorktrees, cwd, ghAvailable, prciData, archivedBranches, termWidth, opts)
 }
 
+// prciFromCache builds a worktreePRCI entry from a cached record.
+func prciFromCache(cached *cache.WorktreeCache) worktreePRCI {
+	prFmt := ""
+	if cached.PRNumber > 0 {
+		prFmt = github.FormatPRState(&github.PRInfo{
+			Number: cached.PRNumber,
+			State:  cached.PRState,
+		})
+	}
+	return worktreePRCI{
+		prFmt:    prFmt,
+		ciFmt:    cached.CIStatus,
+		prNumber: cached.PRNumber,
+		isMerged: cached.PRState == prStateMerged,
+	}
+}
+
 // fetchPRCIData fetches PR/CI info for non-main non-detached worktrees, updating prciData and
 // archivedBranches in-place and printing auto-archive notices to w.
 func fetchPRCIData(
+	ctx context.Context,
 	w io.Writer,
 	worktrees []git.Worktree,
 	repoID *remote.RepoIdentifier,
@@ -255,6 +274,7 @@ func fetchPRCIData(
 	ttl := globalCfg.CacheTTL
 
 	newEntries := make(map[string]cache.WorktreeCache)
+	errorCount := 0
 
 	for _, wt := range worktrees {
 		if wt.Branch == "" || wt.Branch == detachedKeyword || wt.IsMain {
@@ -264,19 +284,7 @@ func fetchPRCIData(
 
 		// Use cached data if fresh
 		if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
-			var prFmt string
-			if cached.PRNumber > 0 {
-				prFmt = github.FormatPRState(&github.PRInfo{
-					Number: cached.PRNumber,
-					State:  cached.PRState,
-				})
-			}
-			prciData[wt.Branch] = worktreePRCI{
-				prFmt:    prFmt,
-				ciFmt:    cached.CIStatus,
-				prNumber: cached.PRNumber,
-				isMerged: cached.PRState == prStateMerged,
-			}
+			prciData[wt.Branch] = prciFromCache(&cached)
 			if cached.PRState == prStateMerged && !archivedBranches[wt.Branch] {
 				autoArchiveBranch(w, wt.Branch, cached.PRNumber, repoID, stateStore, archivedBranches)
 			}
@@ -284,8 +292,11 @@ func fetchPRCIData(
 		}
 
 		// Fetch fresh data
-		pr, _ := listGetPRForBranch(wt.Branch)
-		ci, _ := listGetCIStatus(wt.Branch)
+		pr, prErr := listGetPRForBranch(ctx, wt.Branch)
+		ci, ciErr := listGetCIStatus(ctx, wt.Branch)
+		if prErr != nil || ciErr != nil {
+			errorCount++ // count branches (not individual calls) that had fetch errors
+		}
 
 		prFmt := github.FormatPRState(pr)
 		ciFmt := github.FormatCIStatus(ci)
@@ -312,6 +323,10 @@ func fetchPRCIData(
 		if isMerged && !archivedBranches[wt.Branch] {
 			autoArchiveBranch(w, wt.Branch, prNum, repoID, stateStore, archivedBranches)
 		}
+	}
+
+	if errorCount > 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "warning: failed to fetch PR/CI status for %d branch(es)\n", errorCount)
 	}
 
 	_ = cacheStore.SetBatch(newEntries)
@@ -583,22 +598,24 @@ func computeListColumns(
 	return bw, prw, ciw
 }
 
-// truncateStr truncates a string to fit within maxWidth, using ellipsis.
+// truncateStr truncates a string to fit within maxWidth (in runes), using ellipsis.
 func truncateStr(s string, maxWidth int) string {
-	if maxWidth <= 0 || len(s) <= maxWidth {
+	runes := []rune(s)
+	if maxWidth <= 0 || len(runes) <= maxWidth {
 		return s
 	}
 
 	const ellipsis = "..."
-	if maxWidth <= len(ellipsis) {
-		return s[:maxWidth]
+	ellipsisLen := len([]rune(ellipsis)) // 3
+	if maxWidth <= ellipsisLen {
+		return string(runes[:maxWidth])
 	}
 
-	availableWidth := maxWidth - len(ellipsis)
+	availableWidth := maxWidth - ellipsisLen
 	startLen := availableWidth / 3 //nolint:mnd // show 1/3 start, 2/3 end
 	endLen := availableWidth - startLen
 
-	return s[:startLen] + ellipsis + s[len(s)-endLen:]
+	return string(runes[:startLen]) + ellipsis + string(runes[len(runes)-endLen:])
 }
 
 // maybeShowGHNotAvailableHint shows a one-time hint about the gh CLI being unavailable.
@@ -619,8 +636,8 @@ type listDisplayOptions struct {
 }
 
 func resolveListDisplayOptions(cmd *cli.Command, w io.Writer) listDisplayOptions {
-	maxPathWidth := cmd.Int("max-path-width")
-	if maxPathWidth == defaultMaxPathWidth && !cmd.IsSet("max-path-width") {
+	maxPathWidth := cmd.Int("max-branch-width")
+	if maxPathWidth == defaultMaxPathWidth && !cmd.IsSet("max-branch-width") && !cmd.IsSet("max-path-width") {
 		if envValue := os.Getenv("WTP_LIST_MAX_PATH"); envValue != "" {
 			if parsed, err := strconv.Atoi(envValue); err == nil && parsed > 0 {
 				maxPathWidth = parsed

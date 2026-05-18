@@ -18,6 +18,7 @@ import (
 	"github.com/satococoa/wtp/v3/internal/git"
 	"github.com/satococoa/wtp/v3/internal/remote"
 	"github.com/satococoa/wtp/v3/internal/state"
+	"github.com/satococoa/wtp/v3/internal/xdg"
 )
 
 // Variable to allow mocking in tests
@@ -30,7 +31,7 @@ func NewRemoveCommand() *cli.Command {
 		Aliases:   []string{"rm"},
 		Usage:     "Remove a worktree",
 		UsageText: "wtp remove <worktree-name>",
-		Description: "Removes the worktree with the specified directory name.\n" +
+		Description: "Removes the worktree with the specified branch name.\n" +
 			"By default, also deletes the associated branch.\n\n" +
 			"Examples:\n" +
 			"  wtp remove feature-old                  # Remove worktree and branch\n" +
@@ -145,6 +146,8 @@ func removeCommandWithCommandExecutor(
 	}
 	// Best-effort: clean up state and cache entries for the removed worktree.
 	cleanupWorktreeStateAndCache(cwd, targetWorktree.Branch)
+	// Best-effort: remove empty centralized storage directories.
+	cleanupCentralizedWorktreeDir(targetWorktree.Path)
 
 	if _, err := fmt.Fprintf(w, "Removed worktree '%s' at %s\n", worktreeName, targetWorktree.Path); err != nil {
 		return err
@@ -208,6 +211,42 @@ func removeBranchWithCommandExecutor(
 	}
 	_, err = fmt.Fprintf(w, "Removed branch '%s'\n", branchName)
 	return err
+}
+
+// cleanupCentralizedWorktreeDir removes the leaf worktree directory and any empty parent
+// directories up to WorktreeStorageRoot() after a successful worktree removal.
+// Only acts on paths inside centralized storage; silently no-ops otherwise.
+func cleanupCentralizedWorktreeDir(worktreePath string) {
+	storageRoot := xdg.WorktreeStorageRoot()
+	if storageRoot == "" {
+		return
+	}
+
+	absPath, err := filepath.Abs(worktreePath)
+	if err != nil {
+		return
+	}
+
+	absRoot, err := filepath.Abs(storageRoot)
+	if err != nil {
+		return
+	}
+
+	// Only clean up paths inside centralized storage.
+	prefix := absRoot + string(os.PathSeparator)
+	if absPath != absRoot && !strings.HasPrefix(absPath, prefix) {
+		return
+	}
+
+	// Walk upward from leaf, removing empty dirs until we reach storageRoot.
+	dir := absPath
+	for dir != absRoot {
+		if err := os.Remove(dir); err != nil {
+			// Non-empty dir or other error — stop climbing.
+			break
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 // cleanupWorktreeStateAndCache removes state and cache entries for the given branch after a

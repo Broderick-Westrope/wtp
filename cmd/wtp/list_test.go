@@ -152,6 +152,7 @@ func TestListCommand_CommandConstruction(t *testing.T) {
 
 			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
+				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
@@ -222,6 +223,7 @@ func TestListCommand_Output(t *testing.T) {
 
 			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
+				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
@@ -274,6 +276,7 @@ func TestListCommand_ExecutionError(t *testing.T) {
 
 	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -302,6 +305,7 @@ func TestListCommand_NoWorktrees(t *testing.T) {
 
 	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -371,6 +375,7 @@ func TestListCommand_InternationalCharacters(t *testing.T) {
 
 			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
+				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
@@ -431,6 +436,7 @@ func TestListCommand_LongBranchNames(t *testing.T) {
 
 			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
+				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
@@ -487,6 +493,7 @@ branch refs/heads/feature/test
 
 	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -528,6 +535,7 @@ func TestListCommand_HeaderFormatting(t *testing.T) {
 
 	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -653,6 +661,7 @@ branch refs/heads/feature/awesome
 
 			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
+				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
@@ -770,6 +779,7 @@ branch refs/heads/hoge
 
 			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
+				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
@@ -835,6 +845,7 @@ branch refs/heads/stripe-basil-migration
 
 			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
+				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
@@ -891,6 +902,7 @@ branch refs/heads/feature/very-long-branch-name-that-exceeds-max-width
 	opts.MaxPathWidth = 30
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -933,6 +945,7 @@ branch refs/heads/feature/test
 	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -979,6 +992,7 @@ branch refs/heads/feature/test
 	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd, &buf, mockExec, cfg, "/test/repo",
 		false, false, false, opts,
 	)
@@ -1022,6 +1036,7 @@ func TestListCommand_QuietMode_SingleWorktree(t *testing.T) {
 
 	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -1067,6 +1082,7 @@ branch refs/heads/feature/another
 
 	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -1104,6 +1120,7 @@ func TestListCommand_QuietMode_NoWorktrees(t *testing.T) {
 
 	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -1141,6 +1158,7 @@ detached
 
 	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
@@ -1206,6 +1224,7 @@ branch refs/heads/feature/auth
 	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd, &buf, mockExec, cfg, "/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -1267,6 +1286,7 @@ branch refs/heads/feature/other
 		cfg := &config.Config{}
 
 		err := listCommandWithCommandExecutor(
+			context.Background(),
 			cmd, &buf, mockExec, cfg, "/test/repo",
 			false, false, false, // quiet=false, showAll=false, noSync=false
 			defaultListDisplayOptionsForTests(),
@@ -1283,6 +1303,7 @@ branch refs/heads/feature/other
 		cfg := &config.Config{}
 
 		err := listCommandWithCommandExecutor(
+			context.Background(),
 			cmd, &buf, mockExec, cfg, "/test/repo",
 			false, true, false, // quiet=false, showAll=true, noSync=false
 			defaultListDisplayOptionsForTests(),
@@ -1302,14 +1323,14 @@ func TestListCommand_NoSync_SkipsGHCalls(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ string) (*github.PRInfo, error) {
+	listGetPRForBranch = func(_ context.Context, _ string) (*github.PRInfo, error) {
 		ghCallCount++
 		return nil, nil
 	}
 	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
 
 	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ string) (*github.CIStatus, error) {
+	listGetCIStatus = func(_ context.Context, _ string) (*github.CIStatus, error) {
 		ghCallCount++
 		return nil, nil
 	}
@@ -1336,6 +1357,7 @@ branch refs/heads/feature/test
 	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd, &buf, mockExec, cfg, "/test/repo",
 		false, false, true, // noSync=true
 		defaultListDisplayOptionsForTests(),
@@ -1362,7 +1384,7 @@ func TestListCommand_AutoArchiveMergedPR(t *testing.T) {
 	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
 
 	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(branch string) (*github.PRInfo, error) {
+	listGetPRForBranch = func(_ context.Context, branch string) (*github.PRInfo, error) {
 		if branch == "feature/merged" {
 			return &github.PRInfo{Number: 42, State: "MERGED", Title: "Merged PR"}, nil
 		}
@@ -1371,7 +1393,7 @@ func TestListCommand_AutoArchiveMergedPR(t *testing.T) {
 	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
 
 	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ string) (*github.CIStatus, error) {
+	listGetCIStatus = func(_ context.Context, _ string) (*github.CIStatus, error) {
 		return nil, nil
 	}
 	t.Cleanup(func() { listGetCIStatus = oldGetCI })
@@ -1397,6 +1419,7 @@ branch refs/heads/feature/merged
 	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd, &buf, mockExec, cfg, "/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -1453,6 +1476,7 @@ detached
 	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd, &buf, mockExec, cfg, "/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -1474,7 +1498,7 @@ func TestListCommand_QuietNoSyncSideEffectFree(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ string) (*github.PRInfo, error) {
+	listGetPRForBranch = func(_ context.Context, _ string) (*github.PRInfo, error) {
 		ghCallCount++
 		return nil, nil
 	}
@@ -1501,6 +1525,7 @@ branch refs/heads/feature/test
 	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd, &buf, mockExec, cfg, "/test/repo",
 		true, false, true, // quiet=true, noSync=true
 		defaultListDisplayOptionsForTests(),
@@ -1530,7 +1555,7 @@ func TestListCommand_WithGHColumns(t *testing.T) {
 	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
 
 	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(branch string) (*github.PRInfo, error) {
+	listGetPRForBranch = func(_ context.Context, branch string) (*github.PRInfo, error) {
 		if branch == "feature/auth" {
 			return &github.PRInfo{Number: 42, State: "OPEN"}, nil
 		}
@@ -1539,7 +1564,7 @@ func TestListCommand_WithGHColumns(t *testing.T) {
 	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
 
 	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ string) (*github.CIStatus, error) {
+	listGetCIStatus = func(_ context.Context, _ string) (*github.CIStatus, error) {
 		if branch := "feature/auth"; branch == "feature/auth" {
 			return &github.CIStatus{State: "passing", Total: 3, Passing: 3}, nil
 		}
@@ -1568,6 +1593,7 @@ branch refs/heads/feature/auth
 	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
+		context.Background(),
 		cmd, &buf, mockExec, cfg, "/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
