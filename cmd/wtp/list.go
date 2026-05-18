@@ -268,8 +268,14 @@ type prciSharedState struct {
 	prciData         map[string]worktreePRCI
 }
 
+// archiveRequest records a branch that needs to be archived after releasing the mutex.
+type archiveRequest struct {
+	branch   string
+	prNumber int
+}
+
 // fetchPRCIForBranch fetches PR/CI data for a single branch and updates shared state.
-// Network calls are made outside the lock; map writes are protected by mu.
+// Network calls and archive I/O are made outside the lock; only map writes are protected by mu.
 func fetchPRCIForBranch(
 	ctx context.Context,
 	wt git.Worktree,
@@ -282,12 +288,19 @@ func fetchPRCIForBranch(
 ) error {
 	// Use cached data if fresh
 	if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
+		var toArchive *archiveRequest
+
 		shared.mu.Lock()
 		shared.prciData[wt.Branch] = prciFromCache(&cached)
 		if cached.PRState == prStateMerged && !shared.archivedBranches[wt.Branch] {
-			autoArchiveBranch(wt.Branch, cached.PRNumber, repoID, stateStore, shared.archivedBranches)
+			shared.archivedBranches[wt.Branch] = true
+			toArchive = &archiveRequest{branch: wt.Branch, prNumber: cached.PRNumber}
 		}
 		shared.mu.Unlock()
+
+		if toArchive != nil {
+			autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
+		}
 		return nil
 	}
 
@@ -301,8 +314,9 @@ func fetchPRCIForBranch(
 	prFmt := github.FormatPRState(pr)
 	ciFmt := github.FormatCIStatus(ci)
 
+	var toArchive *archiveRequest
+
 	shared.mu.Lock()
-	defer shared.mu.Unlock()
 
 	// Only cache successful fetches — partial failures would poison the
 	// cache with PRNumber=0/PRState="" and suppress fresh attempts until
@@ -323,7 +337,14 @@ func fetchPRCIForBranch(
 	}
 
 	if pr != nil && pr.State == prStateMerged && !shared.archivedBranches[wt.Branch] {
-		autoArchiveBranch(wt.Branch, pr.Number, repoID, stateStore, shared.archivedBranches)
+		shared.archivedBranches[wt.Branch] = true
+		toArchive = &archiveRequest{branch: wt.Branch, prNumber: pr.Number}
+	}
+
+	shared.mu.Unlock()
+
+	if toArchive != nil {
+		autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
 	}
 
 	return nil
@@ -375,18 +396,17 @@ func fetchPRCIData(
 	return nil
 }
 
-// autoArchiveBranch marks a branch as archived and prints a notice to stderr
-// so it doesn't interleave with the table output on stdout.
+// autoArchiveBranch persists the archived flag and prints a notice to stderr.
+// The caller is responsible for setting archivedBranches[branch] = true under the mutex
+// before calling this function, so no shared map mutation happens here.
 func autoArchiveBranch(
 	branch string,
 	prNumber int,
 	repoID *remote.RepoIdentifier,
 	stateStore *state.Store,
-	archivedBranches map[string]bool,
 ) {
 	key := repoID.StateKey(branch)
 	_ = stateStore.SetArchived(key, true)
-	archivedBranches[branch] = true
 	_, _ = fmt.Fprintf(os.Stderr, "Auto-archived %s (PR #%d merged)\n", branch, prNumber)
 }
 
