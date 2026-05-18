@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +13,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/satococoa/wtp/v3/internal/command"
-	"github.com/satococoa/wtp/v3/internal/errors"
+	wtperrors "github.com/satococoa/wtp/v3/internal/errors"
+	"github.com/satococoa/wtp/v3/internal/fzf"
 	"github.com/satococoa/wtp/v3/internal/git"
 )
 
@@ -22,11 +24,13 @@ func NewCdCommand() *cli.Command {
 		Name:  "cd",
 		Usage: "Output absolute path to worktree",
 		Description: "Output the absolute path to the specified worktree.\n" +
-			"If no worktree is specified, outputs the main worktree path (like cd goes to $HOME).\n\n" +
+			"If no worktree is specified and fzf is installed, an interactive picker is shown.\n" +
+			"If no worktree is specified and fzf is not installed, outputs the main worktree path.\n\n" +
 			"Usage:\n" +
 			"  Direct:     cd \"$(wtp cd feature)\"\n" +
 			"  With hook:  wtp cd feature\n" +
-			"  Go home:    wtp cd\n\n" +
+			"  Go home:    wtp cd @\n" +
+			"  Browse:     wtp cd          (requires fzf)\n\n" +
 			"To enable the hook for easier navigation:\n" +
 			"  Bash: eval \"$(wtp hook bash)\"\n" +
 			"  Zsh:  eval \"$(wtp hook zsh)\"\n" +
@@ -40,8 +44,9 @@ func NewCdCommand() *cli.Command {
 func cdToWorktree(_ context.Context, cmd *cli.Command) error {
 	args := cmd.Args()
 
-	// Default to main worktree (@) when no argument provided, like cd goes to $HOME
-	worktreeName := "@"
+	// Empty string signals "no argument provided" to the core function.
+	// This lets it distinguish between `wtp cd` and `wtp cd @`.
+	var worktreeName string
 	if args.Len() > 0 {
 		worktreeName = args.Get(0)
 	}
@@ -49,13 +54,13 @@ func cdToWorktree(_ context.Context, cmd *cli.Command) error {
 	// Get current directory
 	cwd, err := os.Getwd()
 	if err != nil {
-		return errors.DirectoryAccessFailed("access current", ".", err)
+		return wtperrors.DirectoryAccessFailed("access current", ".", err)
 	}
 
 	// Initialize repository to check if we're in a git repo
 	_, err = git.NewRepository(cwd)
 	if err != nil {
-		return errors.NotInGitRepository()
+		return wtperrors.NotInGitRepository()
 	}
 
 	// Get the writer from cli.Command
@@ -66,15 +71,15 @@ func cdToWorktree(_ context.Context, cmd *cli.Command) error {
 
 	// Use CommandExecutor-based implementation
 	executor := command.NewRealExecutor()
-	return cdCommandWithCommandExecutor(cmd, w, executor, cwd, worktreeName)
+	finder := fzf.NewFinder()
+	return cdCommandWithCommandExecutor(w, executor, worktreeName, finder)
 }
 
 func cdCommandWithCommandExecutor(
-	_ *cli.Command,
 	w io.Writer,
 	executor command.Executor,
-	_ string,
 	worktreeName string,
+	finder fzf.Finder,
 ) error {
 	// Get worktrees using CommandExecutor
 	listCmd := command.GitWorktreeList()
@@ -85,19 +90,50 @@ func cdCommandWithCommandExecutor(
 
 	// Parse worktrees from command output
 	worktrees := parseWorktreesFromOutput(result.Results[0].Output)
+	names := availableWorktreeNames(worktrees)
 
-	// Find the worktree using branch-name resolution
+	// No argument provided: interactive picker or fall back to main worktree
+	if worktreeName == "" {
+		if finder != nil && finder.Available() {
+			selected, fzfErr := finder.Find(names, "")
+			if fzfErr != nil {
+				if errors.Is(fzfErr, fzf.ErrCanceled) {
+					return nil // user dismissed picker, do nothing
+				}
+				return fzfErr
+			}
+			worktreeName = selected
+		} else {
+			// No fzf: fall back to main worktree (like cd goes to $HOME)
+			worktreeName = "@"
+		}
+	}
+
+	// Try exact match first
 	targetPath, err := resolveWorktreePathByName(worktreeName, worktrees)
 	if err != nil {
-		return err
+		// No exact match: try fuzzy selection if fzf is available
+		if finder != nil && finder.Available() {
+			selected, fzfErr := finder.Find(names, worktreeName)
+			if fzfErr != nil {
+				if errors.Is(fzfErr, fzf.ErrCanceled) {
+					return nil // user dismissed picker
+				}
+				// fzf failed too; return the original resolution error
+				return err
+			}
+			targetPath, err = resolveWorktreePathByName(selected, worktrees)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
 
 	// Output the path for the shell function to cd to
-	if _, err := fmt.Fprintln(w, targetPath); err != nil {
-		return err
-	}
-
-	return nil
+	_, err = fmt.Fprintln(w, targetPath)
+	return err
 }
 
 // getWorktreesForCd gets worktrees for cd command with current position markers and writes them to writer (testable)
