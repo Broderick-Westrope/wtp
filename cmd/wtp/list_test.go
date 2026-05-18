@@ -12,7 +12,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/satococoa/wtp/v3/internal/command"
-	"github.com/satococoa/wtp/v3/internal/config"
 	"github.com/satococoa/wtp/v3/internal/github"
 	"github.com/satococoa/wtp/v3/internal/remote"
 	"github.com/satococoa/wtp/v3/internal/state"
@@ -151,13 +150,11 @@ func TestListCommand_CommandConstruction(t *testing.T) {
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
-				cfg,
 				"/test/repo",
 				false, false, false,
 				defaultListDisplayOptionsForTests(),
@@ -222,13 +219,11 @@ func TestListCommand_Output(t *testing.T) {
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
-				cfg,
 				"/test/repo",
 				false, false, false,
 				defaultListDisplayOptionsForTests(),
@@ -275,13 +270,11 @@ func TestListCommand_ExecutionError(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -304,13 +297,11 @@ func TestListCommand_NoWorktrees(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -374,13 +365,11 @@ func TestListCommand_InternationalCharacters(t *testing.T) {
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
-				cfg,
 				"/test/repo",
 				false, false, false,
 				defaultListDisplayOptionsForTests(),
@@ -435,13 +424,11 @@ func TestListCommand_LongBranchNames(t *testing.T) {
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
-				cfg,
 				"/test/repo",
 				false, false, false,
 				defaultListDisplayOptionsForTests(),
@@ -492,13 +479,11 @@ branch refs/heads/feature/test
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -534,13 +519,11 @@ func TestListCommand_HeaderFormatting(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -660,13 +643,11 @@ branch refs/heads/feature/awesome
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
-				cfg,
 				"/repo",
 				false, false, false,
 				defaultListDisplayOptionsForTests(),
@@ -778,13 +759,11 @@ branch refs/heads/hoge
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
-				cfg,
 				"/test/repo",
 				false, false, false,
 				defaultListDisplayOptionsForTests(),
@@ -844,13 +823,11 @@ branch refs/heads/stripe-basil-migration
 			var buf bytes.Buffer
 			cmd := &cli.Command{}
 
-			cfg := &config.Config{}
 			err := listCommandWithCommandExecutor(
 				context.Background(),
 				cmd,
 				&buf,
 				mockExec,
-				cfg,
 				"/repo",
 				false, false, false,
 				defaultListDisplayOptionsForTests(),
@@ -897,7 +874,6 @@ branch refs/heads/feature/very-long-branch-name-that-exceeds-max-width
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	opts := defaultListDisplayOptionsForTests()
 	opts.MaxPathWidth = 30
@@ -907,7 +883,6 @@ branch refs/heads/feature/very-long-branch-name-that-exceeds-max-width
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		false, false, false,
 		opts,
@@ -943,14 +918,12 @@ branch refs/heads/feature/test
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -990,11 +963,10 @@ branch refs/heads/feature/test
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		context.Background(),
-		cmd, &buf, mockExec, cfg, "/test/repo",
+		cmd, &buf, mockExec, "/test/repo",
 		false, false, false, opts,
 	)
 	assert.NoError(t, err)
@@ -1035,13 +1007,11 @@ func TestListCommand_QuietMode_SingleWorktree(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		true, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -1081,13 +1051,11 @@ branch refs/heads/feature/another
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		true, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -1119,13 +1087,11 @@ func TestListCommand_QuietMode_NoWorktrees(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		true, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -1157,13 +1123,11 @@ detached
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
 
-	cfg := &config.Config{}
 	err := listCommandWithCommandExecutor(
 		context.Background(),
 		cmd,
 		&buf,
 		mockExec,
-		cfg,
 		"/test/repo",
 		true, false, false,
 		defaultListDisplayOptionsForTests(),
@@ -1222,11 +1186,10 @@ branch refs/heads/feature/auth
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		context.Background(),
-		cmd, &buf, mockExec, cfg, "/test/repo",
+		cmd, &buf, mockExec, "/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
@@ -1285,11 +1248,10 @@ branch refs/heads/feature/other
 	t.Run("without --all, archived hidden", func(t *testing.T) {
 		var buf bytes.Buffer
 		cmd := &cli.Command{}
-		cfg := &config.Config{}
 
 		err := listCommandWithCommandExecutor(
 			context.Background(),
-			cmd, &buf, mockExec, cfg, "/test/repo",
+			cmd, &buf, mockExec, "/test/repo",
 			false, false, false, // quiet=false, showAll=false, noSync=false
 			defaultListDisplayOptionsForTests(),
 		)
@@ -1302,11 +1264,10 @@ branch refs/heads/feature/other
 	t.Run("with --all, archived shown", func(t *testing.T) {
 		var buf bytes.Buffer
 		cmd := &cli.Command{}
-		cfg := &config.Config{}
 
 		err := listCommandWithCommandExecutor(
 			context.Background(),
-			cmd, &buf, mockExec, cfg, "/test/repo",
+			cmd, &buf, mockExec, "/test/repo",
 			false, true, false, // quiet=false, showAll=true, noSync=false
 			defaultListDisplayOptionsForTests(),
 		)
@@ -1356,11 +1317,10 @@ branch refs/heads/feature/test
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		context.Background(),
-		cmd, &buf, mockExec, cfg, "/test/repo",
+		cmd, &buf, mockExec, "/test/repo",
 		false, false, true, // noSync=true
 		defaultListDisplayOptionsForTests(),
 	)
@@ -1420,11 +1380,10 @@ branch refs/heads/feature/merged
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		context.Background(),
-		cmd, &buf, mockExec, cfg, "/test/repo",
+		cmd, &buf, mockExec, "/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
@@ -1477,11 +1436,10 @@ detached
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		context.Background(),
-		cmd, &buf, mockExec, cfg, "/test/repo",
+		cmd, &buf, mockExec, "/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)
@@ -1526,11 +1484,10 @@ branch refs/heads/feature/test
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		context.Background(),
-		cmd, &buf, mockExec, cfg, "/test/repo",
+		cmd, &buf, mockExec, "/test/repo",
 		true, false, true, // quiet=true, noSync=true
 		defaultListDisplayOptionsForTests(),
 	)
@@ -1596,11 +1553,10 @@ branch refs/heads/feature/auth
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{}
-	cfg := &config.Config{}
 
 	err := listCommandWithCommandExecutor(
 		context.Background(),
-		cmd, &buf, mockExec, cfg, "/test/repo",
+		cmd, &buf, mockExec, "/test/repo",
 		false, false, false,
 		defaultListDisplayOptionsForTests(),
 	)

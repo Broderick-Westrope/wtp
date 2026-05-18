@@ -128,7 +128,6 @@ func listCommand(ctx context.Context, cmd *cli.Command) error {
 		w = os.Stdout
 	}
 
-	cfg, _ := config.LoadConfig(mainRepoPath)
 	opts := resolveListDisplayOptions(cmd, w)
 
 	quiet := cmd.Bool("quiet")
@@ -136,11 +135,11 @@ func listCommand(ctx context.Context, cmd *cli.Command) error {
 	noSync := cmd.Bool("no-sync")
 
 	executor := listNewExecutor()
-	return listCommandWithCommandExecutor(ctx, cmd, w, executor, cfg, mainRepoPath, quiet, showAll, noSync, opts)
+	return listCommandWithCommandExecutor(ctx, cmd, w, executor, mainRepoPath, quiet, showAll, noSync, opts)
 }
 
 func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many distinct display paths
-	ctx context.Context, _ *cli.Command, w io.Writer, executor command.Executor, _ *config.Config, mainRepoPath string,
+	ctx context.Context, _ *cli.Command, w io.Writer, executor command.Executor, mainRepoPath string,
 	quiet, showAll, noSync bool,
 	opts listDisplayOptions,
 ) error {
