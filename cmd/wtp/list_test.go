@@ -1391,21 +1391,11 @@ branch refs/heads/feature/merged
 	assert.NoError(t, err)
 	output := buf.String()
 
-	// Auto-archive notice should be printed
-	assert.Contains(t, output, "Auto-archived feature/merged (PR #42 merged)")
+	// Auto-archive notice goes to stderr (not captured in buf), so it should NOT be in stdout
+	assert.NotContains(t, output, "Auto-archived", "auto-archive notice should go to stderr, not stdout")
 
 	// The merged branch should NOT appear as a table row (it was auto-archived, showAll=false)
-	// Split output: first line is auto-archive notice, rest is table
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	// Find the table section (after the auto-archive notice line)
-	var tableLines []string
-	for _, line := range lines {
-		if !strings.HasPrefix(line, "Auto-archived") {
-			tableLines = append(tableLines, line)
-		}
-	}
-	tableOutput := strings.Join(tableLines, "\n")
-	assert.NotContains(t, tableOutput, "feature/merged", "merged branch should not appear in table")
+	assert.NotContains(t, output, "feature/merged", "merged branch should not appear in table")
 
 	// State should be updated
 	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}

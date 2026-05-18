@@ -204,7 +204,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	ghAvailable := listIsGHAvailable()
 
 	if ghAvailable && !noSync && !quiet && repoID != nil {
-		if err := fetchPRCIData(ctx, w, displayWorktrees, repoID, stateStore, archivedBranches, prciData); err != nil {
+		if err := fetchPRCIData(ctx, displayWorktrees, repoID, stateStore, archivedBranches, prciData); err != nil {
 			return err
 		}
 
@@ -256,10 +256,9 @@ func prciFromCache(cached *cache.WorktreeCache) worktreePRCI {
 }
 
 // fetchPRCIData fetches PR/CI info for non-main non-detached worktrees, updating prciData and
-// archivedBranches in-place and printing auto-archive notices to w.
+// archivedBranches in-place. Auto-archive notices are printed to stderr.
 func fetchPRCIData(
 	ctx context.Context,
-	w io.Writer,
 	worktrees []git.Worktree,
 	repoID *remote.RepoIdentifier,
 	stateStore *state.Store,
@@ -283,7 +282,7 @@ func fetchPRCIData(
 		if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
 			prciData[wt.Branch] = prciFromCache(&cached)
 			if cached.PRState == prStateMerged && !archivedBranches[wt.Branch] {
-				autoArchiveBranch(w, wt.Branch, cached.PRNumber, repoID, stateStore, archivedBranches)
+				autoArchiveBranch(wt.Branch, cached.PRNumber, repoID, stateStore, archivedBranches)
 			}
 			continue
 		}
@@ -317,7 +316,7 @@ func fetchPRCIData(
 		}
 
 		if pr != nil && pr.State == prStateMerged && !archivedBranches[wt.Branch] {
-			autoArchiveBranch(w, wt.Branch, pr.Number, repoID, stateStore, archivedBranches)
+			autoArchiveBranch(wt.Branch, pr.Number, repoID, stateStore, archivedBranches)
 		}
 	}
 
@@ -329,9 +328,9 @@ func fetchPRCIData(
 	return nil
 }
 
-// autoArchiveBranch marks a branch as archived and prints a notice.
+// autoArchiveBranch marks a branch as archived and prints a notice to stderr
+// so it doesn't interleave with the table output on stdout.
 func autoArchiveBranch(
-	w io.Writer,
 	branch string,
 	prNumber int,
 	repoID *remote.RepoIdentifier,
@@ -341,7 +340,7 @@ func autoArchiveBranch(
 	key := repoID.StateKey(branch)
 	_ = stateStore.SetArchived(key, true)
 	archivedBranches[branch] = true
-	_, _ = fmt.Fprintf(w, "Auto-archived %s (PR #%d merged)\n", branch, prNumber)
+	_, _ = fmt.Fprintf(os.Stderr, "Auto-archived %s (PR #%d merged)\n", branch, prNumber)
 }
 
 // completeList provides shell completion for the list command (flags only)
