@@ -52,6 +52,10 @@ linters:
       enable-all: true
       disable:
         - fieldalignment
+    goconst:
+      min-len: 3
+      min-occurrences: 5
+      ignore-string-values: 'add|remove|list|exec|init|cd|bash|zsh|fish|wtp|branch|force|version|keep-branch'
     gocyclo:
       min-complexity: 15
     misspell:
