@@ -65,7 +65,9 @@ requirements.
 path) **wtp solution:** `wtp cd feature/auth` with tab completion
 
 Jump between worktrees instantly. Use `wtp cd @` to return to your main
-worktree (or just `wtp cd`). No more terminal tab confusion.
+worktree. With `fzf` installed, `wtp cd` (no args) launches an interactive
+picker and `wtp cd <partial>` falls back to fuzzy selection when there's no
+exact match. No more terminal tab confusion.
 
 ## Requirements
 
@@ -79,6 +81,8 @@ worktree (or just `wtp cd`). No more terminal tab confusion.
   - Fish
 - `gh` CLI _(optional)_ — enables PR/CI status columns in `wtp list` and
   powers auto-archive of merged branches
+- `fzf` _(optional)_ — enables interactive fuzzy worktree picker for `wtp cd`
+  (no-arg invocations and partial-match fallback)
 
 ## Releases
 
@@ -367,7 +371,14 @@ After reloading your shell you get the same experience as Homebrew users.
 ### Navigation with wtp cd
 
 The `wtp cd` command outputs the absolute path to a worktree. You can use it in
-two ways:
+two ways. Behaviour depends on how it's invoked:
+
+- **`wtp cd`** (no args) — launches an fzf interactive picker if fzf is
+  installed; otherwise goes to the main worktree.
+- **`wtp cd <partial>`** — if no exact branch match is found and fzf is
+  installed, opens fzf with the query pre-filled for fuzzy selection.
+- **`wtp cd <branch>`** — exact match goes directly (no fzf needed).
+- **`wtp cd @`** — always goes to the main worktree (deterministic).
 
 #### Direct Usage
 
@@ -376,9 +387,11 @@ two ways:
 cd "$(wtp cd feature/auth)"
 
 # Change to the main worktree
+# Note: if fzf is installed, this launches an interactive picker instead.
+# Use `wtp cd @` for a deterministic "go home" in scripts.
 cd "$(wtp cd)"
 
-# Or explicitly:
+# Deterministic: always goes to the main worktree (safe for scripts)
 cd "$(wtp cd @)"
 ```
 
