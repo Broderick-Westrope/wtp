@@ -13,8 +13,9 @@ import (
 func NewHookCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "hook",
-		Usage: "Generate shell hook for cd functionality",
-		Description: "Generate shell hook scripts that enable the 'wtp cd' command to change directories. " +
+		Usage: "Generate shell hook for cd and auto-cd functionality",
+		Description: "Generate shell hook scripts that enable the 'wtp cd' command to change directories " +
+			"and auto-cd after 'wtp add'. " +
 			"This provides a seamless navigation experience without needing subshells.\n\n" +
 			"To enable the hook, add the following to your shell config:\n" +
 			"  Bash (~/.bashrc):         eval \"$(wtp hook bash)\"\n" +
@@ -68,7 +69,7 @@ func hookFish(_ context.Context, cmd *cli.Command) error {
 }
 
 func printBashHook(w io.Writer) error {
-	_, err := fmt.Fprintln(w, `# wtp cd command hook for bash
+	_, err := io.WriteString(w, `# wtp shell hook for bash
 wtp() {
     for arg in "$@"; do
         if [[ "$arg" == "--generate-shell-completion" ]]; then
@@ -93,15 +94,32 @@ wtp() {
             fi
         fi
     else
-        command wtp "$@"
+        local __wtp_stderr_file
+        __wtp_stderr_file=$(mktemp)
+        __WTP_HOOKED=1 command wtp "$@" 2>"$__wtp_stderr_file"
+        local __wtp_exit=$?
+        local __wtp_target=""
+        while IFS= read -r __wtp_line; do
+            if [[ "$__wtp_line" == __wtp_cd:* ]]; then
+                __wtp_target="${__wtp_line#__wtp_cd:}"
+            else
+                printf '%s\n' "$__wtp_line" >&2
+            fi
+        done < "$__wtp_stderr_file"
+        rm -f "$__wtp_stderr_file"
+        if [[ -n "$__wtp_target" && -d "$__wtp_target" ]]; then
+            cd "$__wtp_target" || true
+        fi
+        return $__wtp_exit
     fi
-}`)
+}
+`)
 
 	return err
 }
 
 func printZshHook(w io.Writer) error {
-	_, err := fmt.Fprintln(w, `# wtp cd command hook for zsh
+	_, err := io.WriteString(w, `# wtp shell hook for zsh
 wtp() {
     for arg in "$@"; do
         if [[ "$arg" == "--generate-shell-completion" ]]; then
@@ -126,15 +144,32 @@ wtp() {
             fi
         fi
     else
-        command wtp "$@"
+        local __wtp_stderr_file
+        __wtp_stderr_file=$(mktemp)
+        __WTP_HOOKED=1 command wtp "$@" 2>"$__wtp_stderr_file"
+        local __wtp_exit=$?
+        local __wtp_target=""
+        while IFS= read -r __wtp_line; do
+            if [[ "$__wtp_line" == __wtp_cd:* ]]; then
+                __wtp_target="${__wtp_line#__wtp_cd:}"
+            else
+                printf '%s\n' "$__wtp_line" >&2
+            fi
+        done < "$__wtp_stderr_file"
+        rm -f "$__wtp_stderr_file"
+        if [[ -n "$__wtp_target" && -d "$__wtp_target" ]]; then
+            cd "$__wtp_target" || true
+        fi
+        return $__wtp_exit
     fi
-}`)
+}
+`)
 
 	return err
 }
 
 func printFishHook(w io.Writer) error {
-	_, err := fmt.Fprintln(w, `# wtp cd command hook for fish
+	_, err := fmt.Fprintln(w, `# wtp shell hook for fish
 function wtp
     for arg in $argv
         if test "$arg" = "--generate-shell-completion"
@@ -159,7 +194,22 @@ function wtp
             end
         end
     else
-        command wtp $argv
+        set -l __wtp_stderr_file (mktemp)
+        __WTP_HOOKED=1 command wtp $argv 2>"$__wtp_stderr_file"
+        set -l __wtp_exit $status
+        set -l __wtp_target ""
+        while read -l __wtp_line
+            if string match -q '__wtp_cd:*' -- $__wtp_line
+                set __wtp_target (string replace '__wtp_cd:' '' -- $__wtp_line)
+            else
+                echo "$__wtp_line" >&2
+            end
+        end < $__wtp_stderr_file
+        rm -f $__wtp_stderr_file
+        if test -n "$__wtp_target" -a -d "$__wtp_target"
+            cd "$__wtp_target"
+        end
+        return $__wtp_exit
     end
 end`)
 

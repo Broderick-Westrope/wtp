@@ -21,6 +21,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 	"github.com/Broderick-Westrope/wtp/v3/internal/hooks"
 	wtpio "github.com/Broderick-Westrope/wtp/v3/internal/io"
+	"github.com/Broderick-Westrope/wtp/v3/internal/marker"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
@@ -49,6 +50,10 @@ func NewAddCommand() *cli.Command {
 				Name:  "exec",
 				Usage: "Execute command in newly created worktree after hooks",
 			},
+			&cli.BoolFlag{
+				Name:  "stay",
+				Usage: "Don't change to the new worktree directory after creation",
+			},
 		},
 		Action: addCommand,
 	}
@@ -76,7 +81,7 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 	// Create command executor
 	executor := command.NewRealExecutor()
 
-	return addCommandWithCommandExecutor(cmd, fw, executor, cfg, mainRepoPath, repo.GetRemoteURL)
+	return addCommandWithCommandExecutor(cmd, fw, os.Stderr, executor, cfg, mainRepoPath, repo.GetRemoteURL)
 }
 
 // addCommandWithCommandExecutor is the implementation using CommandExecutor.
@@ -84,6 +89,7 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 func addCommandWithCommandExecutor(
 	cmd *cli.Command,
 	w io.Writer,
+	errW io.Writer,
 	cmdExec command.Executor,
 	cfg *config.Config,
 	mainRepoPath string,
@@ -135,11 +141,22 @@ func addCommandWithCommandExecutor(
 		}
 	}
 
-	if err := executePostCreateCommand(w, cmdExec, cmd.String("exec"), workTreePath); err != nil {
-		return fmt.Errorf("worktree was created at '%s', but --exec command failed: %w", workTreePath, err)
+	execErr := executePostCreateCommand(w, cmdExec, cmd.String("exec"), workTreePath)
+
+	// Emit cd marker before handling exec error — the worktree was created successfully,
+	// so the user should land there even if --exec failed (to debug it).
+	stay := cmd.Bool("stay")
+	if !stay {
+		if err := marker.Emit(errW, workTreePath); err != nil {
+			return err
+		}
 	}
 
-	if err := displaySuccessMessage(w, branchName, workTreePath, mainRepoPath); err != nil {
+	if execErr != nil {
+		return fmt.Errorf("worktree was created at '%s', but --exec command failed: %w", workTreePath, execErr)
+	}
+
+	if err := displaySuccessMessage(w, branchName, workTreePath, mainRepoPath, stay); err != nil {
 		return err
 	}
 
@@ -535,12 +552,12 @@ func completeBranches(_ context.Context, cmd *cli.Command) {
 }
 
 // displaySuccessMessage shows a friendly success message after worktree creation.
-func displaySuccessMessage(w io.Writer, branchName, workTreePath, mainRepoPath string) error {
-	return displaySuccessMessageWithCommitish(w, branchName, workTreePath, "", mainRepoPath)
+func displaySuccessMessage(w io.Writer, branchName, workTreePath, mainRepoPath string, stay bool) error {
+	return displaySuccessMessageWithCommitish(w, branchName, workTreePath, "", mainRepoPath, stay)
 }
 
 func displaySuccessMessageWithCommitish(
-	w io.Writer, branchName, workTreePath, commitish, mainRepoPath string,
+	w io.Writer, branchName, workTreePath, commitish, mainRepoPath string, stay bool,
 ) error {
 	if _, err := fmt.Fprintln(w, "✅ Worktree created successfully!"); err != nil {
 		return err
@@ -565,20 +582,27 @@ func displaySuccessMessageWithCommitish(
 	if _, err := fmt.Fprintln(w); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, "💡 To switch to the new worktree, run:"); err != nil {
-		return err
-	}
 
-	// Use branch name directly; fall back to "@" for the main worktree
-	cdName := branchName
-	if cdName == "" {
-		cdName = filepath.Base(workTreePath)
-	}
-	if isMainWorktree(workTreePath, mainRepoPath) {
-		cdName = "@"
-	}
-	if _, err := fmt.Fprintf(w, "   wtp cd %s\n", cdName); err != nil {
-		return err
+	if stay {
+		if _, err := fmt.Fprintln(w, "💡 To switch to the new worktree, run:"); err != nil {
+			return err
+		}
+
+		// Use branch name directly; fall back to "@" for the main worktree
+		cdName := branchName
+		if cdName == "" {
+			cdName = filepath.Base(workTreePath)
+		}
+		if isMainWorktree(workTreePath, mainRepoPath) {
+			cdName = "@"
+		}
+		if _, err := fmt.Fprintf(w, "   wtp cd %s\n", cdName); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintln(w, "📍 Changed to worktree directory."); err != nil {
+			return err
+		}
 	}
 
 	return nil

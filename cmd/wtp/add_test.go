@@ -53,7 +53,7 @@ func TestNewAddCommand(t *testing.T) {
 	assert.NotNil(t, cmd.ShellComplete)
 
 	// Check simplified flags exist
-	flagNames := []string{"branch", "exec"}
+	flagNames := []string{"branch", "exec", "stay"}
 	for _, name := range flagNames {
 		found := false
 		for _, flag := range cmd.Flags {
@@ -409,7 +409,8 @@ func TestAddCommand_CommandConstruction(t *testing.T) {
 
 			cfg := &config.Config{}
 
-			err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(tt.originURL))
+			var errBuf bytes.Buffer
+			err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(tt.originURL))
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -454,7 +455,10 @@ func TestAddCommand_SuccessMessage(t *testing.T) {
 
 			cfg := &config.Config{}
 
-			err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+			var errBuf bytes.Buffer
+			err := addCommandWithCommandExecutor(
+				cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+			)
 
 			assert.NoError(t, err)
 			assert.Contains(t, buf.String(), tt.expectedOutput)
@@ -495,11 +499,11 @@ func TestAddCommand_NoOriginRemote(t *testing.T) {
 	axdg.Reload()
 
 	cmd := createTestCLICommand(map[string]any{"branch": "feature/auth"}, []string{"feature/auth"})
-	var buf bytes.Buffer
+	var buf, errBuf bytes.Buffer
 	mockExec := &mockCommandExecutor{}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", noOriginRemote())
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", noOriginRemote())
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no 'origin' remote found")
@@ -511,13 +515,13 @@ func TestAddCommand_UnparseableURL(t *testing.T) {
 	axdg.Reload()
 
 	cmd := createTestCLICommand(map[string]any{"branch": "feature/auth"}, []string{"feature/auth"})
-	var buf bytes.Buffer
+	var buf, errBuf bytes.Buffer
 	mockExec := &mockCommandExecutor{}
 	cfg := &config.Config{}
 
 	// SCP-style URL without a path (no owner/repo)
 	badURL := "git@github.com:"
-	err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(badURL))
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(badURL))
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "could not parse remote URL")
@@ -529,11 +533,11 @@ func TestAddCommand_ExecutionError(t *testing.T) {
 	axdg.Reload()
 
 	mockExec := &mockCommandExecutor{shouldFail: true}
-	var buf bytes.Buffer
+	var buf, errBuf bytes.Buffer
 	cmd := createTestCLICommand(map[string]any{"branch": "feature/auth"}, []string{"feature/auth"})
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 	assert.Error(t, err)
 	assert.Len(t, mockExec.executedCommands, 1)
@@ -548,7 +552,7 @@ func TestAddCommand_ExecFailureKeepsCreationContext(t *testing.T) {
 		"branch": "feature/auth",
 		"exec":   "false",
 	}, []string{})
-	var buf bytes.Buffer
+	var buf, errBuf bytes.Buffer
 	exec := &sequencedCommandExecutor{
 		results: []command.Result{
 			{Output: "worktree created"},
@@ -557,7 +561,7 @@ func TestAddCommand_ExecFailureKeepsCreationContext(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, exec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, exec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "worktree was created")
@@ -592,11 +596,13 @@ func TestAddCommand_InternationalCharacters(t *testing.T) {
 			axdg.Reload()
 
 			mockExec := &mockCommandExecutor{}
-			var buf bytes.Buffer
+			var buf, errBuf bytes.Buffer
 			cmd := createTestCLICommand(map[string]any{"branch": tt.branchName}, []string{tt.branchName})
 			cfg := &config.Config{}
 
-			err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+			err := addCommandWithCommandExecutor(
+				cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+			)
 
 			assert.NoError(t, err)
 			assert.Len(t, mockExec.executedCommands, 1)
@@ -619,6 +625,7 @@ func createTestCLICommand(flags map[string]any, args []string) *cli.Command {
 					&cli.StringFlag{Name: "branch"},
 					&cli.StringFlag{Name: "track"},
 					&cli.StringFlag{Name: "exec"},
+					&cli.BoolFlag{Name: "stay"},
 				},
 				Action: func(_ context.Context, _ *cli.Command) error {
 					return nil
@@ -652,11 +659,11 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 	t.Run("should support wtp add <existing-branch>", func(t *testing.T) {
 		// Without a real git repo the resolveBranchTracking step will fail
 		mockExec := &mockCommandExecutor{}
-		var buf bytes.Buffer
+		var buf, errBuf bytes.Buffer
 		cmd := createTestCLICommand(map[string]any{}, []string{"main"})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+		err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 		// resolveBranchTracking calls git.NewRepository which requires a real repo
 		assert.Error(t, err)
@@ -669,11 +676,11 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 		axdg.Reload()
 
 		mockExec := &mockCommandExecutor{}
-		var buf bytes.Buffer
+		var buf, errBuf bytes.Buffer
 		cmd := createTestCLICommand(map[string]any{"branch": "feature/new"}, []string{})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+		err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 		assert.NoError(t, err)
 		assert.Len(t, mockExec.executedCommands, 1)
@@ -689,11 +696,11 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 		axdg.Reload()
 
 		mockExec := &mockCommandExecutor{}
-		var buf bytes.Buffer
+		var buf, errBuf bytes.Buffer
 		cmd := createTestCLICommand(map[string]any{"branch": "hotfix/urgent"}, []string{"main"})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+		err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
 
 		assert.NoError(t, err)
 		assert.Len(t, mockExec.executedCommands, 1)
@@ -860,14 +867,13 @@ func TestDisplaySuccessMessage_Integration(t *testing.T) {
 		workTreePath := "/xdg/data/wtp/worktrees/owner/repo/feature/awesome"
 		mainRepoPath := "/repo"
 
-		require.NoError(t, displaySuccessMessage(&buf, branchName, workTreePath, mainRepoPath))
+		require.NoError(t, displaySuccessMessage(&buf, branchName, workTreePath, mainRepoPath, false))
 
 		output := buf.String()
 		assert.Contains(t, output, "✅ Worktree created successfully!")
 		assert.Contains(t, output, "📁 Location: "+workTreePath)
 		assert.Contains(t, output, "🌿 Branch: feature/awesome")
-		assert.Contains(t, output, "💡 To switch to the new worktree, run:")
-		assert.Contains(t, output, "wtp cd feature/awesome")
+		assert.Contains(t, output, "📍 Changed to worktree directory.")
 	})
 
 	t.Run("should display success message without branch name falls back to dir", func(t *testing.T) {
@@ -876,14 +882,13 @@ func TestDisplaySuccessMessage_Integration(t *testing.T) {
 		workTreePath := "/xdg/data/wtp/worktrees/owner/repo/some-path"
 		mainRepoPath := "/repo"
 
-		require.NoError(t, displaySuccessMessage(&buf, branchName, workTreePath, mainRepoPath))
+		require.NoError(t, displaySuccessMessage(&buf, branchName, workTreePath, mainRepoPath, false))
 
 		output := buf.String()
 		assert.Contains(t, output, "✅ Worktree created successfully!")
 		assert.Contains(t, output, "📁 Location: "+workTreePath)
 		assert.NotContains(t, output, "🌿 Branch:")
-		assert.Contains(t, output, "💡 To switch to the new worktree, run:")
-		assert.Contains(t, output, "wtp cd some-path") // fallback to dir name
+		assert.Contains(t, output, "📍 Changed to worktree directory.")
 	})
 
 	t.Run("should show @ for main worktree", func(t *testing.T) {
@@ -892,13 +897,28 @@ func TestDisplaySuccessMessage_Integration(t *testing.T) {
 		workTreePath := "/repo"
 		mainRepoPath := "/repo"
 
-		require.NoError(t, displaySuccessMessage(&buf, branchName, workTreePath, mainRepoPath))
+		require.NoError(t, displaySuccessMessage(&buf, branchName, workTreePath, mainRepoPath, false))
 
 		output := buf.String()
 		assert.Contains(t, output, "✅ Worktree created successfully!")
 		assert.Contains(t, output, "📁 Location: /repo")
 		assert.Contains(t, output, "🌿 Branch: main")
-		assert.Contains(t, output, "wtp cd @")
+		assert.Contains(t, output, "📍 Changed to worktree directory.")
+	})
+
+	t.Run("should show cd hint when stay is true", func(t *testing.T) {
+		var buf bytes.Buffer
+		branchName := "feature/awesome"
+		workTreePath := "/xdg/data/wtp/worktrees/owner/repo/feature/awesome"
+		mainRepoPath := "/repo"
+
+		require.NoError(t, displaySuccessMessage(&buf, branchName, workTreePath, mainRepoPath, true))
+
+		output := buf.String()
+		assert.Contains(t, output, "✅ Worktree created successfully!")
+		assert.Contains(t, output, "💡 To switch to the new worktree, run:")
+		assert.Contains(t, output, "wtp cd feature/awesome")
+		assert.NotContains(t, output, "📍 Changed to worktree directory.")
 	})
 }
 
@@ -1073,6 +1093,123 @@ func TestAnalyzeGitWorktreeError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ===== Marker and Stay Flag Tests =====
+
+func TestAddCommand_EmitsMarkerWhenHooked(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
+	t.Setenv("__WTP_HOOKED", "1")
+
+	cmd := createTestCLICommand(map[string]any{"branch": "feature/test"}, []string{})
+	var buf, errBuf bytes.Buffer
+	mockExec := &mockCommandExecutor{}
+	cfg := &config.Config{}
+
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+
+	require.NoError(t, err)
+	expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner", "repo", "feature", "test")
+	assert.Contains(t, errBuf.String(), "__wtp_cd:"+expectedPath)
+}
+
+func TestAddCommand_NoMarkerWhenStay(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
+	t.Setenv("__WTP_HOOKED", "1")
+
+	cmd := createTestCLICommand(map[string]any{"branch": "feature/test", "stay": true}, []string{})
+	var buf, errBuf bytes.Buffer
+	mockExec := &mockCommandExecutor{}
+	cfg := &config.Config{}
+
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+
+	require.NoError(t, err)
+	assert.Empty(t, errBuf.String())
+}
+
+func TestAddCommand_NoMarkerWhenNotHooked(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
+	t.Setenv("__WTP_HOOKED", "")
+
+	cmd := createTestCLICommand(map[string]any{"branch": "feature/test"}, []string{})
+	var buf, errBuf bytes.Buffer
+	mockExec := &mockCommandExecutor{}
+	cfg := &config.Config{}
+
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+
+	require.NoError(t, err)
+	assert.Empty(t, errBuf.String())
+}
+
+func TestAddCommand_SuccessMessageShowsCdHint_WhenStay(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
+
+	cmd := createTestCLICommand(map[string]any{"branch": "feature/test", "stay": true}, []string{})
+	var buf, errBuf bytes.Buffer
+	mockExec := &mockCommandExecutor{}
+	cfg := &config.Config{}
+
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "💡 To switch to the new worktree, run:")
+	assert.Contains(t, buf.String(), "wtp cd feature/test")
+	assert.NotContains(t, buf.String(), "📍 Changed to worktree directory.")
+}
+
+func TestAddCommand_SuccessMessageShowsChanged_WhenNotStay(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
+
+	cmd := createTestCLICommand(map[string]any{"branch": "feature/test"}, []string{})
+	var buf, errBuf bytes.Buffer
+	mockExec := &mockCommandExecutor{}
+	cfg := &config.Config{}
+
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "📍 Changed to worktree directory.")
+	assert.NotContains(t, buf.String(), "💡 To switch to the new worktree, run:")
+}
+
+func TestAddCommand_MarkerEmittedBeforeExecError(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	axdg.Reload()
+	t.Setenv("__WTP_HOOKED", "1")
+
+	cmd := createTestCLICommand(map[string]any{
+		"branch": "feature/test",
+		"exec":   "false",
+	}, []string{})
+	var buf, errBuf bytes.Buffer
+	exec := &sequencedCommandExecutor{
+		results: []command.Result{
+			{Output: "worktree created"},
+			{Error: assert.AnError},
+		},
+	}
+	cfg := &config.Config{}
+
+	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, exec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "worktree was created")
+	// Marker should still be emitted even though exec failed
+	expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner", "repo", "feature", "test")
+	assert.Contains(t, errBuf.String(), "__wtp_cd:"+expectedPath)
 }
 
 // ===== Branch Completion Tests =====
