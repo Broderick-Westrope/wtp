@@ -93,7 +93,7 @@ else
         if string match -q '__wtp_cd:*' -- $__wtp_line
             set __wtp_target (string replace '__wtp_cd:' '' -- $__wtp_line)
         else
-            echo $__wtp_line >&2
+            echo "$__wtp_line" >&2
         end
     end < $__wtp_stderr_file
     rm -f $__wtp_stderr_file
