@@ -12,7 +12,7 @@
 - The Go binary cannot `chdir` the parent shell — cd must happen via the existing shell hook pattern
 - Must work for bash, zsh, and fish
 - No user action required to adopt (hook is `eval`'d fresh each shell session)
-- Backward compatible — `--stay` is opt-in, auto-cd is the new default
+- This is a **behavior change**: `wtp add` previously did not cd. Users calling `wtp add` through the shell hook will now auto-cd. Scripts calling `command wtp add` directly (bypassing the hook) are unaffected since the marker goes harmlessly to stderr. Document in release notes.
 
 ## Design Decisions
 
@@ -27,6 +27,10 @@ __wtp_cd:/absolute/path/to/worktree
 - **Why stderr:** stdout stays clean for humans and piping. No stripping logic needed. stderr is the conventional sideband channel.
 - **Why a general marker:** any future command can opt into auto-cd by emitting this marker. No per-command hook logic needed.
 - **Alternative considered:** extending the hook to only wrap `wtp add` (like it does for `wtp cd`). Rejected — less extensible, duplicates wrapping logic.
+
+### Environment variable gating (`__WTP_HOOKED=1`)
+
+The shell hook sets `__WTP_HOOKED=1` before calling `command wtp`. The Go binary only emits the `__wtp_cd:` marker when this env var is set. This prevents confusing marker output when users run `command wtp add` directly without the hook, or in CI/non-interactive contexts.
 
 ### `--stay` flag
 
@@ -45,36 +49,112 @@ __wtp_cd:/absolute/path/to/worktree
 
 `--stay` suppresses step 4 regardless of `--exec`.
 
+**`--exec` failure:** If `--exec` fails, the cd marker is still emitted (before the error is returned). The worktree was created successfully — the user should land in it to debug the exec failure. The error message is still displayed.
+
 ## Implementation Details
 
 ### Shell hook changes
 
-The `else` branch (non-cd commands) currently does `command wtp "$@"`. It needs to:
-1. Capture stderr into a variable while still displaying non-marker stderr lines
-2. Check captured stderr for `__wtp_cd:<path>`
-3. If found, `cd` to the path
+The `else` branch (non-cd commands) currently does `command wtp "$@"`. The new approach uses a temp file to avoid the complexity of real-time stderr capture/filtering:
+
+**Bash/Zsh:**
+```bash
+else
+    local __wtp_stderr_file
+    __wtp_stderr_file=$(mktemp)
+    __WTP_HOOKED=1 command wtp "$@" 2> >(while IFS= read -r __wtp_line; do
+        if [[ "$__wtp_line" == __wtp_cd:* ]]; then
+            printf '%s\n' "$__wtp_line" >> "$__wtp_stderr_file"
+        else
+            printf '%s\n' "$__wtp_line" >&2
+        fi
+    done)
+    local __wtp_exit=$?
+    # Wait for process substitution to complete
+    wait 2>/dev/null
+    local __wtp_target
+    __wtp_target=$(head -1 "$__wtp_stderr_file" 2>/dev/null | cut -c12-)
+    rm -f "$__wtp_stderr_file"
+    if [[ -n "$__wtp_target" && -d "$__wtp_target" ]]; then
+        cd "$__wtp_target" || true
+    fi
+    return $__wtp_exit
+fi
+```
+
+**Fish:**
+```fish
+else
+    set -l __wtp_stderr_file (mktemp)
+    __WTP_HOOKED=1 command wtp $argv 2>| while read -l __wtp_line
+        if string match -q '__wtp_cd:*' -- $__wtp_line
+            echo $__wtp_line >> $__wtp_stderr_file
+        else
+            echo $__wtp_line >&2
+        end
+    end
+    set -l __wtp_exit $pipestatus[1]
+    set -l __wtp_target (head -1 $__wtp_stderr_file 2>/dev/null | string sub -s 12)
+    rm -f $__wtp_stderr_file
+    if test -n "$__wtp_target" -a -d "$__wtp_target"
+        cd "$__wtp_target"
+    end
+    return $__wtp_exit
+end
+```
+
+Key details:
+- Path is always double-quoted in `cd` call to handle spaces/special chars
+- `-d` check validates the directory exists before cd-ing
+- Exit code is preserved and returned
+- Non-marker stderr lines are forwarded to the terminal immediately
+- `__WTP_HOOKED=1` is set on the command invocation
 
 The `wtp cd` branch remains unchanged — it uses stdout, not the marker.
 
 ### Go-side changes
 
-- `cmd/wtp/add.go`: add `--stay` bool flag
-- `cmd/wtp/add.go`: after hooks and exec, if `!stay`, write `__wtp_cd:<worktreePath>` to stderr
-- `cmd/wtp/add.go`: update `displaySuccessMessage` — show "Changed to worktree directory." when not staying, show `wtp cd` hint when staying
-- Consider a shared helper (e.g. `internal/cd/marker.go`) for emitting the marker, so future commands can reuse it
+**Stderr writer architecture:** The existing `addCommandWithCommandExecutor` takes a single `io.Writer w` for stdout. Rather than changing this signature, the marker is written directly to `os.Stderr` — this is intentional since the marker is a shell-integration signal, not user-facing output. For testability, introduce a package-level helper that accepts an `io.Writer` for the stderr target, defaulting to `os.Stderr` in production.
+
+Specifically:
+
+- **`internal/marker/marker.go`** — shared helper:
+  ```go
+  const Prefix = "__wtp_cd:"
+
+  // Emit writes the cd marker to the given writer (os.Stderr in production).
+  // It only emits if __WTP_HOOKED=1 is set.
+  func Emit(w io.Writer, path string) error {
+      if os.Getenv("__WTP_HOOKED") != "1" {
+          return nil
+      }
+      _, err := fmt.Fprintf(w, "%s%s\n", Prefix, path)
+      return err
+  }
+  ```
+
+- **`cmd/wtp/add.go`** changes:
+  - Add `--stay` bool flag to `NewAddCommand()`
+  - In `addCommandWithCommandExecutor`: add an `errW io.Writer` parameter (defaults to `os.Stderr` in `addCommand()`; tests pass a buffer)
+  - After hooks and exec (but before returning any exec error), if `!stay`: call `marker.Emit(errW, workTreePath)`
+  - Update `displaySuccessMessage` to accept a `stay bool` parameter — show "Changed to worktree directory." when not staying, show `wtp cd` hint when staying
 
 **Success Criteria:**
 - [ ] `wtp add my-feature` creates the worktree and cds into it (via shell hook)
 - [ ] `wtp add my-feature --stay` creates the worktree without cd-ing, shows `wtp cd` hint
 - [ ] `wtp add my-feature --exec "npm install"` runs exec in worktree, then cds there
 - [ ] `wtp add my-feature --exec "npm install" --stay` runs exec but does not cd
+- [ ] `--exec` failure still emits cd marker (worktree exists, user should land there)
 - [ ] Shell hooks updated for bash, zsh, and fish
 - [ ] Marker mechanism is general-purpose (not add-specific)
 - [ ] Non-marker stderr lines still display normally
 - [ ] Existing `wtp cd` behavior unchanged
+- [ ] Marker only emitted when `__WTP_HOOKED=1` is set (no noise for direct callers)
+- [ ] Paths with spaces/special characters handled correctly (double-quoted cd)
+- [ ] Marker emission is testable via injected `io.Writer`
 
 **Context Files:**
-- `cmd/wtp/add.go` — add command implementation
+- `cmd/wtp/add.go` — add command implementation (single `io.Writer w` for stdout at line 86)
 - `cmd/wtp/hook.go:70-167` — shell hook output (bash, zsh, fish)
 - `cmd/wtp/cd.go` — existing cd command (stdout-based, unaffected)
 - `internal/command/builders.go` — git worktree add builder
