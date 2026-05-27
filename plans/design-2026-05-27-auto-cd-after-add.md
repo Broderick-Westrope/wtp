@@ -57,23 +57,23 @@ The shell hook sets `__WTP_HOOKED=1` before calling `command wtp`. The Go binary
 
 The `else` branch (non-cd commands) currently does `command wtp "$@"`. The new approach uses a temp file to avoid the complexity of real-time stderr capture/filtering:
 
+All stderr is redirected to a temp file. After the command exits, the temp file is post-processed: marker lines are extracted, non-marker lines are forwarded to stderr. This approach is simpler and avoids process substitution race conditions and unreliable `$?` capture.
+
 **Bash/Zsh:**
 ```bash
 else
     local __wtp_stderr_file
     __wtp_stderr_file=$(mktemp)
-    __WTP_HOOKED=1 command wtp "$@" 2> >(while IFS= read -r __wtp_line; do
+    __WTP_HOOKED=1 command wtp "$@" 2>"$__wtp_stderr_file"
+    local __wtp_exit=$?
+    local __wtp_target=""
+    while IFS= read -r __wtp_line; do
         if [[ "$__wtp_line" == __wtp_cd:* ]]; then
-            printf '%s\n' "$__wtp_line" >> "$__wtp_stderr_file"
+            __wtp_target="${__wtp_line#__wtp_cd:}"
         else
             printf '%s\n' "$__wtp_line" >&2
         fi
-    done)
-    local __wtp_exit=$?
-    # Wait for process substitution to complete
-    wait 2>/dev/null
-    local __wtp_target
-    __wtp_target=$(head -1 "$__wtp_stderr_file" 2>/dev/null | cut -c12-)
+    done < "$__wtp_stderr_file"
     rm -f "$__wtp_stderr_file"
     if [[ -n "$__wtp_target" && -d "$__wtp_target" ]]; then
         cd "$__wtp_target" || true
@@ -86,15 +86,16 @@ fi
 ```fish
 else
     set -l __wtp_stderr_file (mktemp)
-    __WTP_HOOKED=1 command wtp $argv 2>| while read -l __wtp_line
+    __WTP_HOOKED=1 command wtp $argv 2>"$__wtp_stderr_file"
+    set -l __wtp_exit $status
+    set -l __wtp_target ""
+    while read -l __wtp_line
         if string match -q '__wtp_cd:*' -- $__wtp_line
-            echo $__wtp_line >> $__wtp_stderr_file
+            set __wtp_target (string replace '__wtp_cd:' '' -- $__wtp_line)
         else
             echo $__wtp_line >&2
         end
-    end
-    set -l __wtp_exit $pipestatus[1]
-    set -l __wtp_target (head -1 $__wtp_stderr_file 2>/dev/null | string sub -s 12)
+    end < $__wtp_stderr_file
     rm -f $__wtp_stderr_file
     if test -n "$__wtp_target" -a -d "$__wtp_target"
         cd "$__wtp_target"
@@ -104,11 +105,14 @@ end
 ```
 
 Key details:
+- All stderr goes to temp file, post-processed after command exits — no race conditions
+- `$?` / `$status` unambiguously captures `wtp`'s exit code (no process substitution interference)
+- Path extracted via parameter expansion (`${line#__wtp_cd:}` / `string replace`) — no hardcoded character offsets
 - Path is always double-quoted in `cd` call to handle spaces/special chars
 - `-d` check validates the directory exists before cd-ing
-- Exit code is preserved and returned
-- Non-marker stderr lines are forwarded to the terminal immediately
+- Non-marker stderr lines are forwarded to the terminal after command completes
 - `__WTP_HOOKED=1` is set on the command invocation
+- Tradeoff: stderr output is buffered until after command completes (acceptable — `wtp add` runs in < 1s)
 
 The `wtp cd` branch remains unchanged — it uses stdout, not the marker.
 
