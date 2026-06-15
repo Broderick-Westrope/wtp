@@ -3,6 +3,7 @@ module github.com/Broderick-Westrope/wtp/v3
 go 1.26
 
 require (
+	charm.land/lipgloss/v2 v2.0.3
 	github.com/adrg/xdg v0.5.3
 	github.com/gofrs/flock v0.13.0
 	github.com/stretchr/testify v1.11.1
@@ -16,7 +17,6 @@ require (
 require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect
-	charm.land/lipgloss/v2 v2.0.3 // indirect
 	codeberg.org/chavacava/garif v0.2.0 // indirect
 	codeberg.org/polyfloyd/go-errorlint v1.9.0 // indirect
 	dario.cat/mergo v1.0.0 // indirect

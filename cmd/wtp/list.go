@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
@@ -29,17 +31,13 @@ import (
 
 // Display constants
 const (
-	branchHeaderDashes = 6
-	headDisplayLength  = 8
-	detachedKeyword    = "detached"
-	ghHintFileName     = ".gh-hint-shown"
+	headDisplayLength = 8
+	detachedKeyword   = "detached"
+	ghHintFileName    = ".gh-hint-shown"
 )
 
 const (
 	defaultMaxPathWidth = 56 // also used as default max branch column width
-	superWideThreshold  = 160
-	columnSep           = 2 // spaces between columns
-	minBranchWidth      = 6 // minimum branch column width = len("BRANCH")
 )
 
 // worktreePRCI holds PR/CI display data for a single worktree, keyed by branch name.
@@ -228,14 +226,9 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	}
 
 	termWidth := getTerminalWidth()
-	if !opts.Compact {
-		if !opts.OutputIsTTY {
-			opts.Compact = true
-		} else if termWidth >= superWideThreshold {
-			// On super-wide terminals (>=160 cols), enable compact mode to prevent
-			// comically wide BRANCH columns that waste horizontal space.
-			opts.Compact = true
-		}
+	if !opts.Compact && !opts.OutputIsTTY {
+		// Redirected output gets the borderless compact format for easier parsing.
+		opts.Compact = true
 	}
 
 	return displayWorktreesTable(w, displayWorktrees, cwd, ghAvailable, prciData, archivedBranches, termWidth, opts)
@@ -525,7 +518,7 @@ type listRow struct {
 	head          string
 }
 
-// displayWorktreesTable renders the tabular worktree list.
+// displayWorktreesTable renders the worktree list as a lipgloss table.
 func displayWorktreesTable(
 	w io.Writer,
 	worktrees []git.Worktree,
@@ -540,32 +533,16 @@ func displayWorktreesTable(
 		termWidth = 80
 	}
 
-	rows, maxBranch, maxPR, maxCI := buildListRows(worktrees, currentPath, ghAvailable, prciData, archivedBranches)
+	rows := buildListRows(worktrees, currentPath, ghAvailable, prciData, archivedBranches)
 	if len(rows) == 0 {
 		return nil
 	}
 
-	bw, prw, ciw := computeListColumns(maxBranch, maxPR, maxCI, termWidth, ghAvailable, opts)
-
-	// Print header
+	tbl := newListTable(opts)
 	if ghAvailable {
-		if _, err := fmt.Fprintf(w, "%-*s  %-*s  %-*s  %s\n", bw, "BRANCH", prw, "PR", ciw, "CI", "HEAD"); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, "%-*s  %-*s  %-*s  %s\n",
-			bw, strings.Repeat("-", branchHeaderDashes),
-			prw, "--",
-			ciw, "--",
-			"----"); err != nil {
-			return err
-		}
+		tbl.Headers("BRANCH", "PR", "CI", "HEAD")
 	} else {
-		if _, err := fmt.Fprintf(w, "%-*s  %s\n", bw, "BRANCH", "HEAD"); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, "%-*s  %s\n", bw, strings.Repeat("-", branchHeaderDashes), "----"); err != nil {
-			return err
-		}
+		tbl.Headers("BRANCH", "HEAD")
 	}
 
 	for _, row := range rows {
@@ -574,34 +551,56 @@ func displayWorktreesTable(
 			head = head[:headDisplayLength]
 		}
 
-		branch := truncateStr(row.branchDisplay, bw)
+		branch := truncateStr(row.branchDisplay, opts.MaxPathWidth)
 		if ghAvailable {
-			pr := truncateStr(row.pr, prw)
-			ci := truncateStr(row.ci, ciw)
-			if _, err := fmt.Fprintf(w, "%-*s  %-*s  %-*s  %s\n", bw, branch, prw, pr, ciw, ci, head); err != nil {
-				return err
-			}
+			tbl.Row(branch, row.pr, row.ci, head)
 		} else {
-			if _, err := fmt.Fprintf(w, "%-*s  %s\n", bw, branch, head); err != nil {
-				return err
-			}
+			tbl.Row(branch, head)
 		}
 	}
 
-	return nil
+	rendered := tbl.Render()
+	if lipgloss.Width(rendered) > termWidth {
+		rendered = tbl.Width(termWidth).Render()
+	}
+
+	_, err := fmt.Fprintln(w, rendered)
+	return err
 }
 
-// buildListRows constructs display rows and measures max column widths.
+// newListTable builds the base table for list output. Compact mode drops all
+// borders for narrow or redirected output; otherwise a rounded border is used.
+func newListTable(opts listDisplayOptions) *table.Table {
+	tbl := table.New().Wrap(false)
+
+	if opts.Compact {
+		compactStyle := lipgloss.NewStyle().PaddingRight(2) //nolint:mnd // two-space column separator
+		return tbl.
+			BorderTop(false).
+			BorderBottom(false).
+			BorderLeft(false).
+			BorderRight(false).
+			BorderHeader(false).
+			BorderColumn(false).
+			StyleFunc(func(_, _ int) lipgloss.Style { return compactStyle })
+	}
+
+	cellStyle := lipgloss.NewStyle().Padding(0, 1)
+	return tbl.
+		Border(lipgloss.RoundedBorder()).
+		BorderRow(false).
+		StyleFunc(func(_, _ int) lipgloss.Style { return cellStyle })
+}
+
+// buildListRows constructs display rows for the worktree table.
 func buildListRows(
 	worktrees []git.Worktree,
 	currentPath string,
 	ghAvailable bool,
 	prciData map[string]worktreePRCI,
 	archivedBranches map[string]bool,
-) (rows []listRow, maxBranch, maxPR, maxCI int) {
-	maxBranch = len("BRANCH")
-	maxPR = len("PR")
-	maxCI = len("CI")
+) []listRow {
+	rows := make([]listRow, 0, len(worktrees))
 
 	for _, wt := range worktrees {
 		branchDisplay := formatBranchDisplay(wt.Branch)
@@ -623,70 +622,15 @@ func buildListRows(
 			}
 		}
 
-		row := listRow{
+		rows = append(rows, listRow{
 			branchDisplay: branchDisplay,
 			pr:            pr,
 			ci:            ci,
 			head:          wt.HEAD,
-		}
-		rows = append(rows, row)
-
-		if len(branchDisplay) > maxBranch {
-			maxBranch = len(branchDisplay)
-		}
-		if len(pr) > maxPR {
-			maxPR = len(pr)
-		}
-		if len(ci) > maxCI {
-			maxCI = len(ci)
-		}
+		})
 	}
 
-	return rows, maxBranch, maxPR, maxCI
-}
-
-// computeListColumns determines column widths.
-func computeListColumns(
-	maxBranch, maxPR, maxCI, termWidth int,
-	ghAvailable bool,
-	opts listDisplayOptions,
-) (bw, prw, ciw int) {
-	prw = 0
-	ciw = 0
-	if ghAvailable {
-		prw = maxPR
-		ciw = maxCI
-	}
-
-	// Available width for branch column
-	available := termWidth - columnSep - headDisplayLength
-	if ghAvailable {
-		available -= columnSep + prw + columnSep + ciw
-	}
-
-	bw = maxBranch
-	if bw > available {
-		bw = available
-	}
-	if bw < minBranchWidth {
-		bw = minBranchWidth
-	}
-
-	if opts.MaxPathWidth > 0 {
-		bw = min(bw, opts.MaxPathWidth)
-		if bw < minBranchWidth {
-			bw = minBranchWidth
-		}
-	}
-
-	if opts.Compact {
-		bw = min(bw, maxBranch)
-		if bw < minBranchWidth {
-			bw = minBranchWidth
-		}
-	}
-
-	return bw, prw, ciw
+	return rows
 }
 
 // truncateStr truncates a string to fit within maxWidth (in runes), using ellipsis.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v3"
@@ -24,10 +25,10 @@ func defaultListDisplayOptionsForTests() listDisplayOptions {
 	}
 }
 
-// extractBranchColumnWidth measures the BRANCH column width from list output.
+// extractBranchColumnWidth measures the BRANCH column width from compact list output.
 // The BRANCH column is first; its width is determined by where the two-space separator
-// before HEAD (last column) occurs. Only works for no-gh format (tests that use this
-// helper always set listIsGHAvailable = false).
+// before HEAD (last column) occurs. Only works for borderless compact no-gh format
+// (tests that use this helper always set listIsGHAvailable = false and enable compact).
 func extractBranchColumnWidth(t *testing.T, output string) int {
 	t.Helper()
 	lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -78,7 +79,6 @@ func TestNewListCommand(t *testing.T) {
 // ===== Pure Business Logic Tests =====
 
 func TestDisplayConstants(t *testing.T) {
-	assert.Equal(t, 6, branchHeaderDashes)
 	assert.Equal(t, 8, headDisplayLength)
 }
 
@@ -526,7 +526,7 @@ func TestListCommand_HeaderFormatting(t *testing.T) {
 	output := buf.String()
 
 	lines := strings.Split(output, "\n")
-	assert.True(t, len(lines) >= 2, "Should have header and separator lines")
+	assert.True(t, len(lines) >= 4, "Should have border, header, and row lines")
 
 	// New format: BRANCH and HEAD columns (no PATH, no STATUS)
 	assert.Contains(t, output, "BRANCH")
@@ -534,9 +534,9 @@ func TestListCommand_HeaderFormatting(t *testing.T) {
 	assert.NotContains(t, output, "PATH")
 	assert.NotContains(t, output, "STATUS")
 
-	// Should contain separator dashes
-	assert.Contains(t, output, "----")
-	assert.Contains(t, output, "------")
+	// Should render table borders (TTY output)
+	assert.Contains(t, output, "│")
+	assert.Contains(t, output, "─")
 }
 
 // ===== Mock Implementations =====
@@ -829,10 +829,10 @@ branch refs/heads/stripe-basil-migration
 			assert.Contains(t, output, "BRANCH")
 			assert.Contains(t, output, "HEAD")
 
-			// Check that output fits within terminal width
+			// Check that output fits within terminal width (display width, not bytes)
 			lines := strings.Split(strings.TrimSpace(output), "\n")
 			for _, line := range lines {
-				assert.LessOrEqual(t, len(line), tt.terminalWidth,
+				assert.LessOrEqual(t, lipgloss.Width(line), tt.terminalWidth,
 					"Line should not exceed terminal width: %s", line)
 			}
 		})
@@ -877,12 +877,16 @@ branch refs/heads/feature/very-long-branch-name-that-exceeds-max-width
 		opts,
 	)
 	assert.NoError(t, err)
+	output := buf.String()
 
-	width := extractBranchColumnWidth(t, buf.String())
-	assert.Equal(t, 30, width)
+	// Branch names longer than the max width are truncated with an ellipsis.
+	assert.NotContains(t, output, "feature/very-long-branch-name-that-exceeds-max-width")
+	assert.Contains(t, output, "...")
+	expected := truncateStr("feature/very-long-branch-name-that-exceeds-max-width", 30)
+	assert.Contains(t, output, expected)
 }
 
-func TestListCommand_AutoCompactForSuperWideTerminals(t *testing.T) {
+func TestListCommand_WideTerminalKeepsBorderedTable(t *testing.T) {
 	oldIsGH := listIsGHAvailable
 	listIsGHAvailable = func() bool { return false }
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
@@ -917,10 +921,12 @@ branch refs/heads/feature/test
 		defaultListDisplayOptionsForTests(),
 	)
 	assert.NoError(t, err)
+	output := buf.String()
 
-	width := extractBranchColumnWidth(t, buf.String())
-	// Compact triggered at >= 160: branch width = max branch name length = len("feature/test") = 12
-	assert.Equal(t, len("feature/test"), width)
+	// TTY output keeps the bordered table regardless of terminal width;
+	// columns are always sized to content.
+	assert.Contains(t, output, "│")
+	assert.Contains(t, output, "feature/test")
 }
 
 // runCompactTest is a helper for compact mode tests that returns the branch column width.
@@ -978,6 +984,35 @@ func TestListCommand_CompactFlag(t *testing.T) {
 	width := runCompactTest(t, opts)
 	// Compact: branch width = max branch name = len("feature/test") = 12
 	assert.Equal(t, len("feature/test"), width)
+}
+
+func TestListCommand_CompactHasNoBorders(t *testing.T) {
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	mockExec := &mockListCommandExecutor{
+		results: []command.Result{
+			{Output: "worktree /test/repo\nHEAD abc123\nbranch refs/heads/main\n\n", Error: nil},
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &cli.Command{}
+
+	opts := defaultListDisplayOptionsForTests()
+	opts.Compact = true
+	err := listCommandWithCommandExecutor(
+		context.Background(),
+		cmd, &buf, mockExec, "/test/repo",
+		opts,
+	)
+	assert.NoError(t, err)
+	output := buf.String()
+
+	assert.Contains(t, output, "BRANCH")
+	assert.NotContains(t, output, "│", "compact output should have no borders")
+	assert.NotContains(t, output, "─", "compact output should have no borders")
 }
 
 // ===== Quiet Mode Tests =====
