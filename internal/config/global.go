@@ -16,22 +16,36 @@ const (
 	// DefaultCacheTTL is the default cache TTL used when no config file is present.
 	DefaultCacheTTL = 60 * time.Second
 
+	// DefaultArchiveRetention is the default time after which archived worktrees
+	// become eligible for permanent cleanup (10 days).
+	DefaultArchiveRetention = 240 * time.Hour
+
+	// DefaultMaintenanceInterval is the default interval between background
+	// maintenance sweeps.
+	DefaultMaintenanceInterval = 10 * time.Minute
+
 	globalConfigFileName    = "config.yml"
 	globalConfigPermissions = 0o600
 )
 
 // GlobalConfig holds the global wtp configuration stored in $XDG_CONFIG_HOME/wtp/config.yml.
 type GlobalConfig struct {
-	CacheTTL time.Duration `yaml:"cache_ttl"`
+	CacheTTL            time.Duration `yaml:"cache_ttl"`
+	ArchiveRetention    time.Duration `yaml:"archive_retention"`
+	MaintenanceInterval time.Duration `yaml:"maintenance_interval"`
 }
 
 // MarshalYAML serializes GlobalConfig, encoding CacheTTL as a human-readable
 // duration string (e.g. "1m0s").
 func (c GlobalConfig) MarshalYAML() (interface{}, error) {
 	return struct {
-		CacheTTL string `yaml:"cache_ttl"`
+		CacheTTL            string `yaml:"cache_ttl"`
+		ArchiveRetention    string `yaml:"archive_retention"`
+		MaintenanceInterval string `yaml:"maintenance_interval"`
 	}{
-		CacheTTL: c.CacheTTL.String(),
+		CacheTTL:            c.CacheTTL.String(),
+		ArchiveRetention:    c.ArchiveRetention.String(),
+		MaintenanceInterval: c.MaintenanceInterval.String(),
 	}, nil
 }
 
@@ -39,7 +53,9 @@ func (c GlobalConfig) MarshalYAML() (interface{}, error) {
 // duration string (e.g. "60s", "5m") or an integer number of seconds.
 func (c *GlobalConfig) UnmarshalYAML(value *yaml.Node) error {
 	type raw struct {
-		CacheTTL yaml.Node `yaml:"cache_ttl"`
+		CacheTTL            yaml.Node `yaml:"cache_ttl"`
+		ArchiveRetention    yaml.Node `yaml:"archive_retention"`
+		MaintenanceInterval yaml.Node `yaml:"maintenance_interval"`
 	}
 
 	var r raw
@@ -47,27 +63,47 @@ func (c *GlobalConfig) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 
-	// Field absent — use default.
-	if r.CacheTTL.Kind == 0 {
-		c.CacheTTL = DefaultCacheTTL
-		return nil
+	var parseErr error
+
+	c.CacheTTL, parseErr = parseDurationNode(&r.CacheTTL, DefaultCacheTTL, "cache_ttl")
+	if parseErr != nil {
+		return parseErr
 	}
 
-	// Try to parse as a Go duration string first.
-	dur, err := time.ParseDuration(r.CacheTTL.Value)
+	c.ArchiveRetention, parseErr = parseDurationNode(&r.ArchiveRetention, DefaultArchiveRetention, "archive_retention")
+	if parseErr != nil {
+		return parseErr
+	}
+
+	c.MaintenanceInterval, parseErr = parseDurationNode(
+		&r.MaintenanceInterval, DefaultMaintenanceInterval, "maintenance_interval",
+	)
+	if parseErr != nil {
+		return parseErr
+	}
+
+	return nil
+}
+
+// parseDurationNode parses a yaml.Node as a duration. It tries time.ParseDuration
+// first, falls back to integer seconds, and uses the given default when the node
+// is absent (Kind == 0).
+func parseDurationNode(node *yaml.Node, defaultVal time.Duration, fieldName string) (time.Duration, error) {
+	if node.Kind == 0 {
+		return defaultVal, nil
+	}
+
+	dur, err := time.ParseDuration(node.Value)
 	if err == nil {
-		c.CacheTTL = dur
-		return nil
+		return dur, nil
 	}
 
-	// Fall back to integer seconds.
 	var secs int64
-	if decErr := r.CacheTTL.Decode(&secs); decErr == nil {
-		c.CacheTTL = time.Duration(secs) * time.Second
-		return nil
+	if decErr := node.Decode(&secs); decErr == nil {
+		return time.Duration(secs) * time.Second, nil
 	}
 
-	return fmt.Errorf("cannot parse cache_ttl %q as a duration: %w", r.CacheTTL.Value, err)
+	return 0, fmt.Errorf("cannot parse %s %q as a duration: %w", fieldName, node.Value, err)
 }
 
 // globalConfigPath returns the canonical path to the global config file.
@@ -82,7 +118,11 @@ func LoadGlobalConfig() (GlobalConfig, error) {
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is derived from XDG env / home dir
 	if errors.Is(err, os.ErrNotExist) {
-		return GlobalConfig{CacheTTL: DefaultCacheTTL}, nil
+		return GlobalConfig{
+			CacheTTL:            DefaultCacheTTL,
+			ArchiveRetention:    DefaultArchiveRetention,
+			MaintenanceInterval: DefaultMaintenanceInterval,
+		}, nil
 	}
 
 	if err != nil {
@@ -135,7 +175,11 @@ func EnsureGlobalConfig() (GlobalConfig, error) {
 	path := globalConfigPath()
 
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		defaults := GlobalConfig{CacheTTL: DefaultCacheTTL}
+		defaults := GlobalConfig{
+			CacheTTL:            DefaultCacheTTL,
+			ArchiveRetention:    DefaultArchiveRetention,
+			MaintenanceInterval: DefaultMaintenanceInterval,
+		}
 		if saveErr := SaveGlobalConfig(defaults); saveErr != nil {
 			return GlobalConfig{}, fmt.Errorf("failed to create default global config: %w", saveErr)
 		}

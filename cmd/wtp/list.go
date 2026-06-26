@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -153,7 +152,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 		return errors.GitCommandFailed("git worktree list", err.Error())
 	}
 
-	worktrees := parseWorktreesFromOutput(result.Results[0].Output)
+	worktrees := git.ParseWorktreeListOutput(result.Results[0].Output)
 
 	if len(worktrees) == 0 {
 		if !opts.Quiet {
@@ -436,46 +435,6 @@ func autoArchiveBranch(
 func completeList(_ context.Context, cmd *cli.Command) {
 	current, previous := completionArgsFromCommand(cmd)
 	maybeCompleteFlagSuggestions(cmd, current, previous)
-}
-
-func parseWorktreesFromOutput(output string) []git.Worktree {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	var worktrees []git.Worktree
-	var currentWorktree git.Worktree
-	isFirst := true
-
-	for _, line := range lines {
-		if line == "" {
-			if currentWorktree.Path != "" {
-				if isFirst {
-					currentWorktree.IsMain = true
-					isFirst = false
-				}
-				worktrees = append(worktrees, currentWorktree)
-				currentWorktree = git.Worktree{}
-			}
-			continue
-		}
-
-		if strings.HasPrefix(line, "worktree ") {
-			currentWorktree.Path = strings.TrimPrefix(line, "worktree ")
-		} else if strings.HasPrefix(line, "HEAD ") {
-			currentWorktree.HEAD = strings.TrimPrefix(line, "HEAD ")
-		} else if strings.HasPrefix(line, "branch ") {
-			currentWorktree.Branch = strings.TrimPrefix(line, "branch refs/heads/")
-		} else if line == detachedKeyword {
-			currentWorktree.Branch = detachedKeyword
-		}
-	}
-
-	if currentWorktree.Path != "" {
-		if isFirst {
-			currentWorktree.IsMain = true
-		}
-		worktrees = append(worktrees, currentWorktree)
-	}
-
-	return worktrees
 }
 
 // formatBranchDisplay formats branch name for display in the BRANCH column.

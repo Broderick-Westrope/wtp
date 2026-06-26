@@ -89,7 +89,7 @@ func cdCommandWithCommandExecutor(
 	}
 
 	// Parse worktrees from command output
-	worktrees := parseWorktreesFromOutput(result.Results[0].Output)
+	worktrees := git.ParseWorktreeListOutput(result.Results[0].Output)
 	names := availableWorktreeNames(worktrees)
 
 	// No argument provided: interactive picker or fall back to main worktree

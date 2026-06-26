@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gofrs/flock"
 
@@ -39,7 +40,29 @@ type State struct {
 
 // WorktreeState holds per-worktree metadata.
 type WorktreeState struct {
-	Archived bool `json:"archived"`
+	Archived            bool      `json:"archived"`
+	ArchivedAt          time.Time `json:"archived_at,omitzero"`
+	PRClosedAt          time.Time `json:"pr_closed_at,omitzero"`
+	CommitSHA           string    `json:"commit_sha,omitempty"`
+	Branch              string    `json:"branch,omitempty"`
+	WorktreePath        string    `json:"worktree_path,omitempty"`
+	SuppressAutoArchive bool      `json:"suppress_auto_archive,omitempty"`
+}
+
+// IsLegacy returns true when the entry was archived before the metadata-rich
+// format was introduced (Archived is true but CommitSHA is empty).
+func (ws *WorktreeState) IsLegacy() bool {
+	return ws.Archived && ws.CommitSHA == ""
+}
+
+// ExpirationTime returns the timestamp used to compute retention expiry.
+// PRClosedAt takes precedence when set; otherwise ArchivedAt is used.
+// Returns the zero time for legacy entries that have neither timestamp.
+func (ws *WorktreeState) ExpirationTime() time.Time {
+	if !ws.PRClosedAt.IsZero() {
+		return ws.PRClosedAt
+	}
+	return ws.ArchivedAt
 }
 
 // Load reads the state file without acquiring a lock.
@@ -150,6 +173,33 @@ func (s *Store) SetArchived(key string, archived bool) error {
 		entry.Archived = archived
 		st.Worktrees[key] = entry
 
+		return st, nil
+	})
+}
+
+// SetArchivedFull writes the complete WorktreeState for the given key.
+// Use this when archiving with full metadata (SHA, timestamps, etc.).
+func (s *Store) SetArchivedFull(key string, ws *WorktreeState) error {
+	return s.WithLock(func(st State) (State, error) {
+		st.Worktrees[key] = *ws
+		return st, nil
+	})
+}
+
+// ClearArchived un-archives the entry for key: sets Archived=false, clears
+// CommitSHA/ArchivedAt/PRClosedAt/WorktreePath, sets SuppressAutoArchive=true,
+// and keeps the Branch field.
+func (s *Store) ClearArchived(key string) error {
+	return s.WithLock(func(st State) (State, error) {
+		entry := st.Worktrees[key]
+		entry.Archived = false
+		entry.CommitSHA = ""
+		entry.ArchivedAt = time.Time{}
+		entry.PRClosedAt = time.Time{}
+		entry.WorktreePath = ""
+		entry.SuppressAutoArchive = true
+		// Keep entry.Branch
+		st.Worktrees[key] = entry
 		return st, nil
 	})
 }

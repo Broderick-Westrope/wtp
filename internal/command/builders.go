@@ -63,6 +63,11 @@ func GitBranchDelete(branchName string, force bool) Command {
 	}
 }
 
+// GitBranchForceDelete builds a git branch force-delete command (git branch -D).
+func GitBranchForceDelete(branchName string) Command {
+	return GitBranchDelete(branchName, true)
+}
+
 // GitWorktreeRemove builds a git worktree remove command
 func GitWorktreeRemove(path string, force bool) Command {
 	args := []string{"worktree", "remove"}

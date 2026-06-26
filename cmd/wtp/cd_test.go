@@ -13,6 +13,7 @@ import (
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
 	"github.com/Broderick-Westrope/wtp/v3/internal/fzf"
+	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 )
 
 // --- test doubles ---
@@ -96,7 +97,7 @@ func TestCdCommand_AlwaysOutputsAbsolutePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			worktrees := parseWorktreesFromOutput(realisticWorktreeList)
+			worktrees := git.ParseWorktreeListOutput(realisticWorktreeList)
 
 			resolvedPath, err := resolveWorktreePathByName(tt.worktreeName, worktrees)
 
@@ -144,7 +145,7 @@ func TestCdCommand_NoEnvironmentVariableDependency(t *testing.T) {
 			}
 
 			worktreeList := "worktree /test/main\nHEAD abc\nbranch refs/heads/main\n\n"
-			worktrees := parseWorktreesFromOutput(worktreeList)
+			worktrees := git.ParseWorktreeListOutput(worktreeList)
 
 			resolvedPath, err := resolveWorktreePathByName("@", worktrees)
 			require.NoError(t, err)
@@ -188,7 +189,7 @@ func TestCdCommand_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			worktrees := parseWorktreesFromOutput(tt.worktreeList)
+			worktrees := git.ParseWorktreeListOutput(tt.worktreeList)
 
 			result, err := resolveWorktreePathByName(tt.worktreeName, worktrees)
 

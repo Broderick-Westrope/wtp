@@ -31,6 +31,7 @@ type TestEnvironment struct {
 	xdgConfigHome string
 	xdgCacheHome  string
 	wtpBinary     string
+	cmdEnv        []string // pre-built env for RunWTP calls
 	cleanup       []func()
 }
 
@@ -60,6 +61,7 @@ func NewTestEnvironment(t *testing.T) *TestEnvironment {
 		cleanup:       []func(){},
 	}
 
+	env.cmdEnv = env.buildCmdEnv()
 	env.buildWTP()
 
 	return env
@@ -100,6 +102,53 @@ func (e *TestEnvironment) buildWTP() {
 	}
 
 	e.wtpBinary = wtpBinary
+}
+
+// buildCmdEnv builds the environment variables for RunWTP calls.
+// It starts from os.Environ(), overrides HOME and XDG dirs, and removes
+// fzf from PATH to prevent interactive prompts from blocking tests.
+func (e *TestEnvironment) buildCmdEnv() []string {
+	overrides := map[string]bool{
+		"HOME":            true,
+		"XDG_DATA_HOME":   true,
+		"XDG_CONFIG_HOME": true,
+		"XDG_CACHE_HOME":  true,
+		"PATH":            true,
+	}
+
+	var env []string
+	for _, kv := range os.Environ() {
+		key, _, _ := strings.Cut(kv, "=")
+		if overrides[key] {
+			continue
+		}
+		env = append(env, kv)
+	}
+
+	env = append(env,
+		"HOME="+e.tmpDir,
+		"XDG_DATA_HOME="+e.xdgDataHome,
+		"XDG_CONFIG_HOME="+e.xdgConfigHome,
+		"XDG_CACHE_HOME="+e.xdgCacheHome,
+		"PATH="+filteredPath(),
+	)
+
+	return env
+}
+
+// filteredPath returns the system PATH with directories containing fzf removed.
+// This prevents interactive fuzzy-finder prompts from hanging non-interactive
+// test processes.
+func filteredPath() string {
+	dirs := filepath.SplitList(os.Getenv("PATH"))
+	var filtered []string
+	for _, dir := range dirs {
+		if _, err := os.Stat(filepath.Join(dir, "fzf")); err == nil {
+			continue
+		}
+		filtered = append(filtered, dir)
+	}
+	return strings.Join(filtered, string(os.PathListSeparator))
 }
 
 func (e *TestEnvironment) findProjectRoot() string {
@@ -202,12 +251,22 @@ func (e *TestEnvironment) RunWTP(args ...string) (string, error) {
 
 	// Create command with validated binary path
 	cmd := createSafeCommand(e.wtpBinary, args...)
-	cmd.Env = append(os.Environ(),
-		"HOME="+e.tmpDir,
-		"XDG_DATA_HOME="+e.xdgDataHome,
-		"XDG_CONFIG_HOME="+e.xdgConfigHome,
-		"XDG_CACHE_HOME="+e.xdgCacheHome,
-	)
+	cmd.Env = e.cmdEnv
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
+// RunWTPInDir runs the wtp binary from the specified directory.
+func (e *TestEnvironment) RunWTPInDir(dir string, args ...string) (string, error) {
+	e.t.Helper()
+	for _, arg := range args {
+		if err := validateArg(arg); err != nil {
+			return "", fmt.Errorf("invalid argument: %w", err)
+		}
+	}
+	cmd := createSafeCommand(e.wtpBinary, args...)
+	cmd.Dir = dir
+	cmd.Env = e.cmdEnv
 	output, err := cmd.CombinedOutput()
 	return string(output), err
 }
@@ -270,15 +329,9 @@ func (r *TestRepo) RunWTP(args ...string) (string, error) {
 		}
 	}
 
-	// Create command with validated binary path
 	cmd := createSafeCommand(r.env.wtpBinary, args...)
 	cmd.Dir = r.path
-	cmd.Env = append(os.Environ(),
-		"HOME="+r.env.tmpDir,
-		"XDG_DATA_HOME="+r.env.xdgDataHome,
-		"XDG_CONFIG_HOME="+r.env.xdgConfigHome,
-		"XDG_CACHE_HOME="+r.env.xdgCacheHome,
-	)
+	cmd.Env = r.env.cmdEnv
 
 	output, err := cmd.CombinedOutput()
 	return string(output), err

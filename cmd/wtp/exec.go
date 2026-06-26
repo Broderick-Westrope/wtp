@@ -70,7 +70,7 @@ func execCommandWithCommandExecutor(cmd *cli.Command, w io.Writer, executor comm
 		return errors.GitCommandFailed("git worktree list", msg)
 	}
 
-	worktrees := parseWorktreesFromOutput(gitResult.Output)
+	worktrees := git.ParseWorktreeListOutput(gitResult.Output)
 	targetPath, err := resolveWorktreePathByName(worktreeName, worktrees)
 	if err != nil {
 		return err

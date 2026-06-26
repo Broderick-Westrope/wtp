@@ -55,7 +55,7 @@ func doctorCommand(_ context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return errors.GitCommandFailed("git worktree list", err.Error())
 	}
-	worktrees := parseWorktreesFromOutput(result.Results[0].Output)
+	worktrees := git.ParseWorktreeListOutput(result.Results[0].Output)
 
 	// Determine repo root (main worktree path)
 	var repoRoot string

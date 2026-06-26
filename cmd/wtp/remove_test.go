@@ -12,6 +12,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 )
 
 // ===== Command Structure Tests =====
@@ -70,7 +71,7 @@ func TestRemoveCommand_WorktreeResolution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			worktrees := parseWorktreesFromOutput(tt.worktreeList)
+			worktrees := git.ParseWorktreeListOutput(tt.worktreeList)
 
 			targetWorktree, err := findTargetWorktreeFromList(worktrees, tt.worktreeName)
 

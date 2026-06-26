@@ -260,6 +260,69 @@ func isGitRepository(path string) bool {
 	return true
 }
 
+// CommitExists checks whether the given SHA exists in the repository.
+// Returns true if the SHA resolves to a valid object, false if it does not exist.
+func (r *Repository) CommitExists(sha string) (bool, error) {
+	if strings.Contains(sha, "..") || strings.ContainsAny(sha, "\n\r") || sha == "" {
+		return false, fmt.Errorf("invalid SHA: %q", sha)
+	}
+
+	// #nosec G204 - sha is validated above
+	cmd := exec.Command("git", "cat-file", "-t", sha)
+	cmd.Dir = r.path
+
+	err := cmd.Run()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if stdErrors.As(err, &exitErr) {
+			// exit code 1 or 128 both indicate the object does not exist
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check commit existence: %w", err)
+	}
+
+	return true, nil
+}
+
+// IsWorktreeDirty checks whether the worktree at the given path has staged or
+// unstaged changes (including untracked files).
+func (*Repository) IsWorktreeDirty(worktreePath string) (bool, error) {
+	// #nosec G204 - worktreePath comes from trusted callers
+	cmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("failed to check worktree status: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
+// HasUnpushedCommits checks whether the given branch has commits not yet pushed
+// to its upstream. Returns false when the branch has no upstream configured.
+func (r *Repository) HasUnpushedCommits(branch string) (bool, error) {
+	if strings.Contains(branch, "..") || strings.ContainsAny(branch, "\n\r") {
+		return false, errors.InvalidBranchName(branch)
+	}
+
+	revRange := fmt.Sprintf("%s@{u}..%s", branch, branch)
+	// #nosec G204 - branch is validated above
+	cmd := exec.Command("git", "log", revRange, "--oneline")
+	cmd.Dir = r.path
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(output)
+		// No upstream configured — treat as no unpushed commits
+		if strings.Contains(outStr, "no upstream configured") ||
+			strings.Contains(outStr, "no such branch") {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check unpushed commits: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
 func parseWorktreeList(output string) []Worktree {
 	var worktrees []Worktree
 	lines := strings.Split(output, "\n")
@@ -290,6 +353,51 @@ func parseWorktreeList(output string) []Worktree {
 
 	if current != nil {
 		worktrees = append(worktrees, *current)
+	}
+
+	return worktrees
+}
+
+const detachedKeyword = "detached"
+
+// ParseWorktreeListOutput parses the porcelain output of `git worktree list --porcelain`
+// into a slice of Worktree structs. The first worktree is marked as IsMain.
+// Detached HEAD worktrees have Branch set to "detached".
+func ParseWorktreeListOutput(output string) []Worktree {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var worktrees []Worktree
+	var currentWorktree Worktree
+	isFirst := true
+
+	for _, line := range lines {
+		if line == "" {
+			if currentWorktree.Path != "" {
+				if isFirst {
+					currentWorktree.IsMain = true
+					isFirst = false
+				}
+				worktrees = append(worktrees, currentWorktree)
+				currentWorktree = Worktree{}
+			}
+			continue
+		}
+
+		if strings.HasPrefix(line, "worktree ") {
+			currentWorktree.Path = strings.TrimPrefix(line, "worktree ")
+		} else if strings.HasPrefix(line, "HEAD ") {
+			currentWorktree.HEAD = strings.TrimPrefix(line, "HEAD ")
+		} else if strings.HasPrefix(line, "branch ") {
+			currentWorktree.Branch = strings.TrimPrefix(line, "branch refs/heads/")
+		} else if line == detachedKeyword {
+			currentWorktree.Branch = detachedKeyword
+		}
+	}
+
+	if currentWorktree.Path != "" {
+		if isFirst {
+			currentWorktree.IsMain = true
+		}
+		worktrees = append(worktrees, currentWorktree)
 	}
 
 	return worktrees

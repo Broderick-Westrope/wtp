@@ -108,7 +108,7 @@ func removeCommandWithCommandExecutor(
 	}
 
 	// Parse worktrees from command output
-	worktrees := parseWorktreesFromOutput(result.Results[0].Output)
+	worktrees := git.ParseWorktreeListOutput(result.Results[0].Output)
 
 	// Find target worktree
 	targetWorktree, err := findTargetWorktreeFromList(worktrees, worktreeName)

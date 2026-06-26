@@ -1,6 +1,11 @@
 package main
 
-import "github.com/urfave/cli/v3"
+import (
+	"context"
+	"os"
+
+	"github.com/urfave/cli/v3"
+)
 
 func newApp() *cli.Command {
 	return &cli.Command{
@@ -11,6 +16,10 @@ func newApp() *cli.Command {
 		Version:                         version,
 		EnableShellCompletion:           true,
 		ConfigureShellCompletionCommand: configureCompletionCommand,
+		Before: func(ctx context.Context, _ *cli.Command) (context.Context, error) {
+			_ = runMaintenance(ctx, os.Stderr)
+			return ctx, nil
+		},
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "version",

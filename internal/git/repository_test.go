@@ -172,6 +172,81 @@ branch refs/heads/feature/test
 	}
 }
 
+func TestParseWorktreeListOutput(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		expected []Worktree
+	}{
+		{
+			name: "single main worktree",
+			output: `worktree /path/to/main
+HEAD abcd1234
+branch refs/heads/main
+`,
+			expected: []Worktree{
+				{
+					Path:   "/path/to/main",
+					HEAD:   "abcd1234",
+					Branch: "main",
+					IsMain: true,
+				},
+			},
+		},
+		{
+			name: "multiple worktrees with detached",
+			output: `worktree /path/to/main
+HEAD abcd1234
+branch refs/heads/main
+
+worktree /path/to/feature
+HEAD efgh5678
+branch refs/heads/feature/test
+
+worktree /path/to/detached
+HEAD 11112222
+detached
+`,
+			expected: []Worktree{
+				{Path: "/path/to/main", HEAD: "abcd1234", Branch: "main", IsMain: true},
+				{Path: "/path/to/feature", HEAD: "efgh5678", Branch: "feature/test"},
+				{Path: "/path/to/detached", HEAD: "11112222", Branch: "detached"},
+			},
+		},
+		{
+			name:     "empty output",
+			output:   "",
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseWorktreeListOutput(tt.output)
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("Expected %d worktrees, got %d", len(tt.expected), len(result))
+				return
+			}
+
+			for i, expected := range tt.expected {
+				if result[i].Path != expected.Path {
+					t.Errorf("Worktree %d: expected path %s, got %s", i, expected.Path, result[i].Path)
+				}
+				if result[i].HEAD != expected.HEAD {
+					t.Errorf("Worktree %d: expected HEAD %s, got %s", i, expected.HEAD, result[i].HEAD)
+				}
+				if result[i].Branch != expected.Branch {
+					t.Errorf("Worktree %d: expected branch %s, got %s", i, expected.Branch, result[i].Branch)
+				}
+				if result[i].IsMain != expected.IsMain {
+					t.Errorf("Worktree %d: expected IsMain %v, got %v", i, expected.IsMain, result[i].IsMain)
+				}
+			}
+		})
+	}
+}
+
 func TestExecuteGitCommand(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	repo, err := NewRepository(repoDir)
@@ -425,6 +500,205 @@ func TestGetRemoteURL(t *testing.T) {
 		_, err = repo.GetRemoteURL("no-such-remote")
 		if err == nil {
 			t.Error("expected error for missing remote, got nil")
+		}
+	})
+}
+
+func TestCommitExists(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	repo, err := NewRepository(repoDir)
+	if err != nil {
+		t.Fatalf("NewRepository: %v", err)
+	}
+
+	headSHA := getHeadCommit(t, repoDir)
+
+	t.Run("existing commit returns true", func(t *testing.T) {
+		exists, err := repo.CommitExists(headSHA)
+		if err != nil {
+			t.Fatalf("CommitExists: %v", err)
+		}
+		if !exists {
+			t.Error("expected true for existing commit")
+		}
+	})
+
+	t.Run("fake SHA returns false", func(t *testing.T) {
+		exists, err := repo.CommitExists("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+		if err != nil {
+			t.Fatalf("CommitExists: %v", err)
+		}
+		if exists {
+			t.Error("expected false for fake SHA")
+		}
+	})
+
+	t.Run("invalid SHA returns error", func(t *testing.T) {
+		_, err := repo.CommitExists("abc..def")
+		if err == nil {
+			t.Error("expected error for invalid SHA with '..'")
+		}
+	})
+
+	t.Run("empty SHA returns error", func(t *testing.T) {
+		_, err := repo.CommitExists("")
+		if err == nil {
+			t.Error("expected error for empty SHA")
+		}
+	})
+}
+
+func TestIsWorktreeDirty(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	repo, err := NewRepository(repoDir)
+	if err != nil {
+		t.Fatalf("NewRepository: %v", err)
+	}
+
+	t.Run("clean worktree returns false", func(t *testing.T) {
+		dirty, err := repo.IsWorktreeDirty(repoDir)
+		if err != nil {
+			t.Fatalf("IsWorktreeDirty: %v", err)
+		}
+		if dirty {
+			t.Error("expected false for clean worktree")
+		}
+	})
+
+	t.Run("dirty worktree returns true", func(t *testing.T) {
+		// Create an untracked file
+		untrackedFile := filepath.Join(repoDir, "untracked.txt")
+		if err := os.WriteFile(untrackedFile, []byte("dirty"), 0644); err != nil {
+			t.Fatalf("Failed to write file: %v", err)
+		}
+
+		dirty, err := repo.IsWorktreeDirty(repoDir)
+		if err != nil {
+			t.Fatalf("IsWorktreeDirty: %v", err)
+		}
+		if !dirty {
+			t.Error("expected true for dirty worktree")
+		}
+	})
+}
+
+// setupCloneWithUpstream creates a bare repo, clones it, configures it,
+// creates an initial commit, and pushes. Returns (cloneDir, branchName).
+func setupCloneWithUpstream(t *testing.T) (cloneDir, branch string) {
+	t.Helper()
+
+	bareDir := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = bareDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to init bare repo: %v", err)
+	}
+
+	cloneDir = t.TempDir()
+	cmd = exec.Command("git", "clone", bareDir, cloneDir)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to clone: %v", err)
+	}
+
+	runGit := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = cloneDir
+		if output, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+
+	testutil.ConfigureTestRepo(t, cloneDir, func(dir string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if err := c.Run(); err != nil {
+			t.Fatalf("git config: %v", err)
+		}
+	})
+
+	readmeFile := filepath.Join(cloneDir, "README.md")
+	if err := os.WriteFile(readmeFile, []byte("# Test"), 0o644); err != nil {
+		t.Fatalf("Failed to write README: %v", err)
+	}
+	runGit("add", "README.md")
+	runGit("commit", "-m", "Initial commit")
+	runGit("push", "-u", "origin", "HEAD")
+
+	branchCmd := exec.Command("git", "branch", "--show-current")
+	branchCmd.Dir = cloneDir
+	branchOutput, err := branchCmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get branch: %v", err)
+	}
+
+	return cloneDir, strings.TrimSpace(string(branchOutput))
+}
+
+func TestHasUnpushedCommits(t *testing.T) {
+	t.Run("no upstream returns false", func(t *testing.T) {
+		repoDir := setupTestRepo(t)
+		repo, err := NewRepository(repoDir)
+		if err != nil {
+			t.Fatalf("NewRepository: %v", err)
+		}
+
+		has, err := repo.HasUnpushedCommits("main")
+		if err != nil {
+			t.Fatalf("HasUnpushedCommits: %v", err)
+		}
+		if has {
+			t.Error("expected false when no upstream configured")
+		}
+	})
+
+	t.Run("with upstream and no unpushed", func(t *testing.T) {
+		cloneDir, branch := setupCloneWithUpstream(t)
+
+		repo, err := NewRepository(cloneDir)
+		if err != nil {
+			t.Fatalf("NewRepository: %v", err)
+		}
+
+		has, err := repo.HasUnpushedCommits(branch)
+		if err != nil {
+			t.Fatalf("HasUnpushedCommits: %v", err)
+		}
+		if has {
+			t.Error("expected false when no unpushed commits")
+		}
+	})
+
+	t.Run("with unpushed commits", func(t *testing.T) {
+		cloneDir, branch := setupCloneWithUpstream(t)
+
+		extraFile := filepath.Join(cloneDir, "extra.txt")
+		if err := os.WriteFile(extraFile, []byte("extra"), 0o644); err != nil {
+			t.Fatalf("Failed to write file: %v", err)
+		}
+		c := exec.Command("git", "add", "extra.txt")
+		c.Dir = cloneDir
+		if output, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git add: %v\n%s", err, output)
+		}
+		c = exec.Command("git", "commit", "-m", "Unpushed commit")
+		c.Dir = cloneDir
+		if output, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git commit: %v\n%s", err, output)
+		}
+
+		repo, err := NewRepository(cloneDir)
+		if err != nil {
+			t.Fatalf("NewRepository: %v", err)
+		}
+
+		has, err := repo.HasUnpushedCommits(branch)
+		if err != nil {
+			t.Fatalf("HasUnpushedCommits: %v", err)
+		}
+		if !has {
+			t.Error("expected true when there are unpushed commits")
 		}
 	})
 }

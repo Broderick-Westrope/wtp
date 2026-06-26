@@ -31,6 +31,14 @@ func TestGlobalLoadDefaults(t *testing.T) {
 	if cfg.CacheTTL != DefaultCacheTTL {
 		t.Errorf("expected CacheTTL %v, got %v", DefaultCacheTTL, cfg.CacheTTL)
 	}
+
+	if cfg.ArchiveRetention != DefaultArchiveRetention {
+		t.Errorf("expected ArchiveRetention %v, got %v", DefaultArchiveRetention, cfg.ArchiveRetention)
+	}
+
+	if cfg.MaintenanceInterval != DefaultMaintenanceInterval {
+		t.Errorf("expected MaintenanceInterval %v, got %v", DefaultMaintenanceInterval, cfg.MaintenanceInterval)
+	}
 }
 
 // TestGlobalRoundTrip verifies that SaveGlobalConfig followed by LoadGlobalConfig
@@ -38,7 +46,11 @@ func TestGlobalLoadDefaults(t *testing.T) {
 func TestGlobalRoundTrip(t *testing.T) {
 	setXDGConfigHome(t, t.TempDir())
 
-	want := GlobalConfig{CacheTTL: 5 * time.Minute}
+	want := GlobalConfig{
+		CacheTTL:            5 * time.Minute,
+		ArchiveRetention:    48 * time.Hour,
+		MaintenanceInterval: 30 * time.Second,
+	}
 
 	if err := SaveGlobalConfig(want); err != nil {
 		t.Fatalf("SaveGlobalConfig: %v", err)
@@ -51,6 +63,14 @@ func TestGlobalRoundTrip(t *testing.T) {
 
 	if got.CacheTTL != want.CacheTTL {
 		t.Errorf("CacheTTL: want %v, got %v", want.CacheTTL, got.CacheTTL)
+	}
+
+	if got.ArchiveRetention != want.ArchiveRetention {
+		t.Errorf("ArchiveRetention: want %v, got %v", want.ArchiveRetention, got.ArchiveRetention)
+	}
+
+	if got.MaintenanceInterval != want.MaintenanceInterval {
+		t.Errorf("MaintenanceInterval: want %v, got %v", want.MaintenanceInterval, got.MaintenanceInterval)
 	}
 }
 
@@ -74,6 +94,14 @@ func TestGlobalEnsureCreatesFile(t *testing.T) {
 
 	if first.CacheTTL != DefaultCacheTTL {
 		t.Errorf("first call: want CacheTTL %v, got %v", DefaultCacheTTL, first.CacheTTL)
+	}
+
+	if first.ArchiveRetention != DefaultArchiveRetention {
+		t.Errorf("first call: want ArchiveRetention %v, got %v", DefaultArchiveRetention, first.ArchiveRetention)
+	}
+
+	if first.MaintenanceInterval != DefaultMaintenanceInterval {
+		t.Errorf("first call: want MaintenanceInterval %v, got %v", DefaultMaintenanceInterval, first.MaintenanceInterval)
 	}
 
 	// File must exist now.
@@ -126,6 +154,85 @@ func TestGlobalDurationParsing(t *testing.T) {
 
 			if cfg.CacheTTL != tc.want {
 				t.Errorf("want %v, got %v", tc.want, cfg.CacheTTL)
+			}
+		})
+	}
+}
+
+// TestGlobalArchiveRetentionParsing verifies that archive_retention is correctly
+// parsed as a duration string or integer seconds, with defaults when absent.
+func TestGlobalArchiveRetentionParsing(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want time.Duration
+	}{
+		{name: "duration string 240h", yaml: `archive_retention: "240h"`, want: 240 * time.Hour},
+		{name: "integer seconds", yaml: `archive_retention: 864000`, want: 240 * time.Hour},
+		{name: "absent uses default", yaml: `cache_ttl: "60s"`, want: DefaultArchiveRetention},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			setXDGConfigHome(t, tmpDir)
+
+			configPath := filepath.Join(tmpDir, "wtp", "config.yml")
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+
+			if err := os.WriteFile(configPath, []byte(tc.yaml+"\n"), 0o600); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			cfg, err := LoadGlobalConfig()
+			if err != nil {
+				t.Fatalf("LoadGlobalConfig: %v", err)
+			}
+
+			if cfg.ArchiveRetention != tc.want {
+				t.Errorf("want %v, got %v", tc.want, cfg.ArchiveRetention)
+			}
+		})
+	}
+}
+
+// TestGlobalMaintenanceIntervalParsing verifies that maintenance_interval is correctly
+// parsed as a duration string, with defaults when absent.
+func TestGlobalMaintenanceIntervalParsing(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want time.Duration
+	}{
+		{name: "duration string 10m", yaml: `maintenance_interval: "10m"`, want: 10 * time.Minute},
+		{name: "duration string 30s", yaml: `maintenance_interval: "30s"`, want: 30 * time.Second},
+		{name: "integer seconds", yaml: `maintenance_interval: 600`, want: 10 * time.Minute},
+		{name: "absent uses default", yaml: `cache_ttl: "60s"`, want: DefaultMaintenanceInterval},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			setXDGConfigHome(t, tmpDir)
+
+			configPath := filepath.Join(tmpDir, "wtp", "config.yml")
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+
+			if err := os.WriteFile(configPath, []byte(tc.yaml+"\n"), 0o600); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+
+			cfg, err := LoadGlobalConfig()
+			if err != nil {
+				t.Fatalf("LoadGlobalConfig: %v", err)
+			}
+
+			if cfg.MaintenanceInterval != tc.want {
+				t.Errorf("want %v, got %v", tc.want, cfg.MaintenanceInterval)
 			}
 		})
 	}

@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	cmdTimeout  = 10 * time.Second
-	stateReady  = "OPEN"
-	stateDraft  = "DRAFT"
-	stateClosed = "CLOSED"
+	cmdTimeout = 10 * time.Second
+	stateReady = "OPEN"
+	stateDraft = "DRAFT"
+	// StateClosed is the PR state for closed (not merged) pull requests.
+	// Exported for use by callers that need to check PR state (e.g. auto-archive logic).
+	StateClosed = "CLOSED"
 
 	// StateMerged is the PR state for merged pull requests. Exported for use
 	// by callers that need to check PR state (e.g. auto-archive logic).
@@ -210,7 +212,7 @@ func FormatPRState(pr *PRInfo) string {
 	switch pr.State {
 	case StateMerged:
 		label = "Merged"
-	case stateClosed:
+	case StateClosed:
 		label = "Closed"
 	case stateDraft:
 		label = "Draft"
