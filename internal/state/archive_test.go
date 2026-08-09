@@ -63,7 +63,7 @@ func TestPerformArchive_Success(t *testing.T) {
 		WorktreePath: "/tmp/wt/feature-foo",
 	}
 
-	err := state.PerformArchive(executor, store, "owner/repo::feature/foo", &ws)
+	_, err := state.PerformArchive(executor, store, "owner/repo::feature/foo", &ws)
 	require.NoError(t, err)
 
 	// Verify state was written
@@ -90,7 +90,7 @@ func TestPerformArchive_SkipsWhenFieldsEmpty(t *testing.T) {
 		// No WorktreePath or Branch — should skip both remove and delete
 	}
 
-	err := state.PerformArchive(executor, store, "owner/repo::empty", &ws)
+	_, err := state.PerformArchive(executor, store, "owner/repo::empty", &ws)
 	require.NoError(t, err)
 
 	// No executor calls should be made
@@ -117,7 +117,7 @@ func TestPerformArchive_WorktreeAlreadyGone(t *testing.T) {
 		WorktreePath: "/tmp/wt/gone",
 	}
 
-	err := state.PerformArchive(executor, store, "owner/repo::feature/bar", &ws)
+	_, err := state.PerformArchive(executor, store, "owner/repo::feature/bar", &ws)
 	require.NoError(t, err, "should succeed even when worktree is already gone")
 }
 
@@ -140,6 +140,6 @@ func TestPerformArchive_BranchAlreadyGone(t *testing.T) {
 		WorktreePath: "/tmp/wt/feature-gone",
 	}
 
-	err := state.PerformArchive(executor, store, "owner/repo::feature/gone", &ws)
+	_, err := state.PerformArchive(executor, store, "owner/repo::feature/gone", &ws)
 	require.NoError(t, err, "should succeed even when branch is already gone")
 }

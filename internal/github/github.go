@@ -37,6 +37,7 @@ type PRInfo struct {
 	Title      string
 	HeadBranch string
 	IsDraft    bool
+	ClosedAt   time.Time
 }
 
 // CIStatus holds aggregated CI check status for a pull request.
@@ -50,11 +51,12 @@ type CIStatus struct {
 
 // prViewResponse is the JSON structure returned by `gh pr view --json`.
 type prViewResponse struct {
-	Number      int    `json:"number"`
-	State       string `json:"state"`
-	Title       string `json:"title"`
-	HeadRefName string `json:"headRefName"`
-	IsDraft     bool   `json:"isDraft"`
+	Number      int       `json:"number"`
+	State       string    `json:"state"`
+	Title       string    `json:"title"`
+	HeadRefName string    `json:"headRefName"`
+	IsDraft     bool      `json:"isDraft"`
+	ClosedAt    time.Time `json:"closedAt"`
 }
 
 // checkEntry is one item in the JSON array returned by `gh pr checks --json`.
@@ -96,7 +98,7 @@ func GetPRForBranch(ctx context.Context, branch string) (*PRInfo, error) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "gh", "pr", "view",
-		"--json", "number,state,title,headRefName,isDraft", "--", branch)
+		"--json", "number,state,title,headRefName,isDraft,closedAt", "--", branch)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -125,6 +127,7 @@ func GetPRForBranch(ctx context.Context, branch string) (*PRInfo, error) {
 		Title:      resp.Title,
 		HeadBranch: resp.HeadRefName,
 		IsDraft:    resp.IsDraft,
+		ClosedAt:   resp.ClosedAt,
 	}
 
 	// Override state for drafts so callers see a single canonical value.

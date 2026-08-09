@@ -153,7 +153,7 @@ func (r *Repository) ExecuteGitCommand(args ...string) error {
 // BranchExists checks if a branch exists locally
 func (r *Repository) BranchExists(branch string) (bool, error) {
 	// Validate branch name to prevent command injection
-	if strings.Contains(branch, "..") || strings.ContainsAny(branch, "\n\r") {
+	if branch == "" || strings.Contains(branch, "..") || strings.ContainsAny(branch, "\n\r") {
 		return false, errors.InvalidBranchName(branch)
 	}
 
@@ -271,17 +271,16 @@ func (r *Repository) CommitExists(sha string) (bool, error) {
 	cmd := exec.Command("git", "cat-file", "-t", sha)
 	cmd.Dir = r.path
 
-	err := cmd.Run()
+	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if stdErrors.As(err, &exitErr) {
-			// exit code 1 or 128 both indicate the object does not exist
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to check commit existence: %w", err)
 	}
 
-	return true, nil
+	return strings.TrimSpace(string(output)) == "commit", nil
 }
 
 // IsWorktreeDirty checks whether the worktree at the given path has staged or
@@ -358,7 +357,8 @@ func parseWorktreeList(output string) []Worktree {
 	return worktrees
 }
 
-const detachedKeyword = "detached"
+// DetachedKeyword is the branch value for worktrees with a detached HEAD.
+const DetachedKeyword = "detached"
 
 // ParseWorktreeListOutput parses the porcelain output of `git worktree list --porcelain`
 // into a slice of Worktree structs. The first worktree is marked as IsMain.
@@ -388,8 +388,8 @@ func ParseWorktreeListOutput(output string) []Worktree {
 			currentWorktree.HEAD = strings.TrimPrefix(line, "HEAD ")
 		} else if strings.HasPrefix(line, "branch ") {
 			currentWorktree.Branch = strings.TrimPrefix(line, "branch refs/heads/")
-		} else if line == detachedKeyword {
-			currentWorktree.Branch = detachedKeyword
+		} else if line == DetachedKeyword {
+			currentWorktree.Branch = DetachedKeyword
 		}
 	}
 

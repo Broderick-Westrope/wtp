@@ -63,50 +63,37 @@ func NewRunner(
 // RunCheap reaps expired and legacy archive entries for the current repo.
 // This is a pure file-I/O operation with no network calls.
 func (r *Runner) RunCheap() error {
-	st, err := r.stateStore.Load()
-	if err != nil {
-		return nil //nolint:nilerr // best-effort
-	}
-
-	prefix := r.repoID.StoragePath() + "::"
-	now := timeNow()
-
-	var toDelete []string
 	var legacyCount int
 
-	for key, ws := range st.Worktrees {
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-
-		if ws.IsLegacy() {
-			toDelete = append(toDelete, key)
-			legacyCount++
-			continue
-		}
-
-		if !ws.Archived {
-			continue
-		}
-
-		exp := ws.ExpirationTime()
-		if exp.IsZero() {
-			continue
-		}
-
-		if now.Sub(exp) > r.globalCfg.ArchiveRetention {
-			toDelete = append(toDelete, key)
-		}
-	}
-
-	if len(toDelete) == 0 {
-		return nil
-	}
-
 	_ = r.stateStore.WithLock(func(st state.State) (state.State, error) {
-		for _, key := range toDelete {
-			delete(st.Worktrees, key)
+		prefix := r.repoID.StoragePath() + "::"
+		now := timeNow()
+
+		for key, ws := range st.Worktrees {
+			if !strings.HasPrefix(key, prefix) {
+				continue
+			}
+
+			if ws.IsLegacy() {
+				delete(st.Worktrees, key)
+				legacyCount++
+				continue
+			}
+
+			if !ws.Archived {
+				continue
+			}
+
+			exp := ws.ExpirationTime()
+			if exp.IsZero() {
+				continue
+			}
+
+			if now.Sub(exp) > r.globalCfg.ArchiveRetention {
+				delete(st.Worktrees, key)
+			}
 		}
+
 		return st, nil
 	})
 
@@ -193,7 +180,7 @@ func (r *Runner) RunExpensive(ctx context.Context) error { //nolint:gocyclo // o
 	}
 
 	for _, wt := range worktrees {
-		if wt.IsMain || wt.Branch == "" || wt.Branch == "detached" {
+		if wt.IsMain || wt.Branch == "" || wt.Branch == git.DetachedKeyword {
 			continue
 		}
 
@@ -238,16 +225,20 @@ func (r *Runner) RunExpensive(ctx context.Context) error { //nolint:gocyclo // o
 		}
 
 		now := timeNow()
+		prClosedAt := pr.ClosedAt
+		if prClosedAt.IsZero() {
+			prClosedAt = now
+		}
 		archiveWS := &state.WorktreeState{
 			Archived:     true,
 			ArchivedAt:   now,
-			PRClosedAt:   now,
+			PRClosedAt:   prClosedAt,
 			CommitSHA:    wt.HEAD,
 			Branch:       wt.Branch,
 			WorktreePath: wt.Path,
 		}
 
-		if archiveErr := state.PerformArchive(executor, r.stateStore, key, archiveWS); archiveErr != nil {
+		if _, archiveErr := state.PerformArchive(executor, r.stateStore, key, archiveWS); archiveErr != nil {
 			_, _ = fmt.Fprintf(r.stderr, "warning: failed to auto-archive %s: %v\n", wt.Branch, archiveErr)
 			continue
 		}

@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,7 +33,6 @@ import (
 // Display constants
 const (
 	headDisplayLength = 8
-	detachedKeyword   = "detached"
 	ghHintFileName    = ".gh-hint-shown"
 )
 
@@ -175,20 +176,23 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	stateStore := state.NewStore()
 	st, _ := stateStore.Load()
 
-	// Build set of archived branches
+	// Build set of archived branches from state.json. Archived branches no
+	// longer appear in `git worktree list`, so state is the source of truth.
 	archivedBranches := make(map[string]bool)
 	if repoID != nil {
-		for _, wt := range worktrees {
-			if wt.Branch != "" && !wt.IsMain {
-				key := repoID.StateKey(wt.Branch)
-				if st.Worktrees[key].Archived {
-					archivedBranches[wt.Branch] = true
-				}
+		prefix := repoID.StoragePath() + "::"
+		for key, ws := range st.Worktrees {
+			if !ws.Archived || !strings.HasPrefix(key, prefix) {
+				continue
+			}
+			if _, branch := remote.ParseStateKey(key); branch != "" {
+				archivedBranches[branch] = true
 			}
 		}
 	}
 
-	// Filter out archived worktrees unless --all
+	// Filter out archived worktrees unless --all. Archived worktrees normally
+	// aren't in git anymore, but partial archive failures can leave them behind.
 	displayWorktrees := make([]git.Worktree, 0, len(worktrees))
 	for _, wt := range worktrees {
 		if !opts.ShowAll && archivedBranches[wt.Branch] {
@@ -197,24 +201,19 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 		displayWorktrees = append(displayWorktrees, wt)
 	}
 
+	// Synthesize rows for archived entries when --all is set — they no longer
+	// exist in git, so their metadata comes from state.json.
+	if opts.ShowAll && repoID != nil {
+		displayWorktrees = appendArchivedEntries(displayWorktrees, st, repoID)
+	}
+
 	// PR/CI data collection
 	prciData := make(map[string]worktreePRCI)
 	ghAvailable := listIsGHAvailable()
 
 	if ghAvailable && !opts.NoSync && !opts.Quiet && repoID != nil {
-		if err := fetchPRCIData(ctx, displayWorktrees, repoID, stateStore, archivedBranches, prciData); err != nil {
+		if err := fetchPRCIData(ctx, displayWorktrees, repoID, archivedBranches, prciData); err != nil {
 			return err
-		}
-
-		// Rebuild displayWorktrees after auto-archiving (unless --all)
-		if !opts.ShowAll {
-			remaining := make([]git.Worktree, 0, len(displayWorktrees))
-			for _, wt := range displayWorktrees {
-				if !archivedBranches[wt.Branch] {
-					remaining = append(remaining, wt)
-				}
-			}
-			displayWorktrees = remaining
 		}
 	} else if !ghAvailable && !opts.Quiet {
 		maybeShowGHNotAvailableHint()
@@ -250,34 +249,27 @@ func prciFromCache(cached *cache.WorktreeCache) worktreePRCI {
 
 // prciSharedState holds the shared mutable state passed to per-branch fetch goroutines.
 type prciSharedState struct {
-	mu               sync.Mutex
-	errorCount       atomic.Int32
-	newEntries       map[string]cache.WorktreeCache
-	archivedBranches map[string]bool
-	prciData         map[string]worktreePRCI
-}
-
-// archiveRequest records a branch that needs to be archived after releasing the mutex.
-type archiveRequest struct {
-	branch   string
-	prNumber int
+	mu         sync.Mutex
+	errorCount atomic.Int32
+	newEntries map[string]cache.WorktreeCache
+	prciData   map[string]worktreePRCI
 }
 
 // fetchPRCIForBranch fetches PR/CI data for a single branch and updates shared state.
-// Network calls and archive I/O are made outside the lock; only map writes are protected by mu.
+// Network calls are made outside the lock; only map writes are protected by mu.
 func fetchPRCIForBranch(
 	ctx context.Context,
 	wt git.Worktree,
 	key string,
-	repoID *remote.RepoIdentifier,
-	stateStore *state.Store,
 	cacheStore *cache.Store,
 	ttl time.Duration,
 	shared *prciSharedState,
 ) error {
 	// Use cached data if fresh
 	if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
-		handleCachedPRCI(wt.Branch, &cached, repoID, stateStore, shared)
+		shared.mu.Lock()
+		shared.prciData[wt.Branch] = prciFromCache(&cached)
+		shared.mu.Unlock()
 		return nil
 	}
 
@@ -297,51 +289,22 @@ func fetchPRCIForBranch(
 	prFmt := github.FormatPRState(pr)
 	ciFmt := github.FormatCIStatus(ci)
 
-	toArchive := updateSharedWithFreshData(wt.Branch, key, pr, prErr, ciErr, prFmt, ciFmt, shared)
-
-	if toArchive != nil {
-		autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
-	}
+	updateSharedWithFreshData(wt.Branch, key, pr, prErr, ciErr, prFmt, ciFmt, shared)
 
 	return nil
 }
 
-// handleCachedPRCI updates shared state from a valid cache entry and triggers
-// auto-archive if the PR was merged. I/O happens outside the mutex.
-func handleCachedPRCI(
-	branch string,
-	cached *cache.WorktreeCache,
-	repoID *remote.RepoIdentifier,
-	stateStore *state.Store,
-	shared *prciSharedState,
-) {
-	var toArchive *archiveRequest
-
-	shared.mu.Lock()
-	shared.prciData[branch] = prciFromCache(cached)
-	if cached.PRState == github.StateMerged && !shared.archivedBranches[branch] {
-		shared.archivedBranches[branch] = true
-		toArchive = &archiveRequest{branch: branch, prNumber: cached.PRNumber}
-	}
-	shared.mu.Unlock()
-
-	if toArchive != nil {
-		autoArchiveBranch(toArchive.branch, toArchive.prNumber, repoID, stateStore)
-	}
-}
-
 // updateSharedWithFreshData writes freshly-fetched PR/CI data into shared state
-// under the mutex. Returns an archiveRequest if the branch needs auto-archiving.
+// under the mutex.
 func updateSharedWithFreshData(
 	branch, key string,
 	pr *github.PRInfo,
 	prErr, ciErr error,
 	prFmt, ciFmt string,
 	shared *prciSharedState,
-) *archiveRequest {
-	var toArchive *archiveRequest
-
+) {
 	shared.mu.Lock()
+	defer shared.mu.Unlock()
 
 	// Only cache successful fetches — partial failures would poison the
 	// cache with PRNumber=0/PRState="" and suppress fresh attempts until
@@ -360,25 +323,16 @@ func updateSharedWithFreshData(
 		prFmt: prFmt,
 		ciFmt: ciFmt,
 	}
-
-	if pr != nil && pr.State == github.StateMerged && !shared.archivedBranches[branch] {
-		shared.archivedBranches[branch] = true
-		toArchive = &archiveRequest{branch: branch, prNumber: pr.Number}
-	}
-
-	shared.mu.Unlock()
-
-	return toArchive
 }
 
-// fetchPRCIData fetches PR/CI info for non-main non-detached worktrees, updating prciData and
-// archivedBranches in-place. Auto-archive notices are printed to stderr.
-// Fetches across branches are parallelized using errgroup.
+// fetchPRCIData fetches PR/CI info for non-main non-detached worktrees, updating prciData
+// in-place. Fetches across branches are parallelized using errgroup.
+// Archived branches are skipped — they no longer exist in git.
+// Auto-archive is handled by the maintenance system, not list.
 func fetchPRCIData(
 	ctx context.Context,
 	worktrees []git.Worktree,
 	repoID *remote.RepoIdentifier,
-	stateStore *state.Store,
 	archivedBranches map[string]bool,
 	prciData map[string]worktreePRCI,
 ) error {
@@ -387,21 +341,20 @@ func fetchPRCIData(
 	ttl := globalCfg.CacheTTL
 
 	shared := &prciSharedState{
-		newEntries:       make(map[string]cache.WorktreeCache),
-		archivedBranches: archivedBranches,
-		prciData:         prciData,
+		newEntries: make(map[string]cache.WorktreeCache),
+		prciData:   prciData,
 	}
 
 	g, gCtx := errgroup.WithContext(ctx)
 
 	for _, wt := range worktrees {
-		if wt.Branch == "" || wt.Branch == detachedKeyword || wt.IsMain {
+		if wt.Branch == "" || wt.Branch == git.DetachedKeyword || wt.IsMain || archivedBranches[wt.Branch] {
 			continue
 		}
 
 		key := repoID.StateKey(wt.Branch)
 		g.Go(func() error {
-			return fetchPRCIForBranch(gCtx, wt, key, repoID, stateStore, cacheStore, ttl, shared)
+			return fetchPRCIForBranch(gCtx, wt, key, cacheStore, ttl, shared)
 		})
 	}
 
@@ -417,18 +370,39 @@ func fetchPRCIData(
 	return nil
 }
 
-// autoArchiveBranch persists the archived flag and prints a notice to stderr.
-// The caller is responsible for setting archivedBranches[branch] = true under the mutex
-// before calling this function, so no shared map mutation happens here.
-func autoArchiveBranch(
-	branch string,
-	prNumber int,
+// appendArchivedEntries appends synthetic worktree rows for archived state
+// entries belonging to the current repo. Entries whose branch already exists
+// in the display list (partial archive failures) are skipped. The synthetic
+// rows are sorted by branch name for deterministic output.
+func appendArchivedEntries(
+	displayWorktrees []git.Worktree,
+	st state.State,
 	repoID *remote.RepoIdentifier,
-	stateStore *state.Store,
-) {
-	key := repoID.StateKey(branch)
-	_ = stateStore.SetArchived(key, true)
-	_, _ = fmt.Fprintf(os.Stderr, "Auto-archived %s (PR #%d merged)\n", branch, prNumber)
+) []git.Worktree {
+	existing := make(map[string]bool, len(displayWorktrees))
+	for _, wt := range displayWorktrees {
+		existing[wt.Branch] = true
+	}
+
+	prefix := repoID.StoragePath() + "::"
+
+	var synthetic []git.Worktree
+	for key, ws := range st.Worktrees {
+		if !ws.Archived || !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		_, branch := remote.ParseStateKey(key)
+		if branch == "" || existing[branch] {
+			continue
+		}
+
+		synthetic = append(synthetic, git.Worktree{Branch: branch, HEAD: ws.CommitSHA})
+	}
+
+	sort.Slice(synthetic, func(i, j int) bool { return synthetic[i].Branch < synthetic[j].Branch })
+
+	return append(displayWorktrees, synthetic...)
 }
 
 // completeList provides shell completion for the list command (flags only)
@@ -439,7 +413,7 @@ func completeList(_ context.Context, cmd *cli.Command) {
 
 // formatBranchDisplay formats branch name for display in the BRANCH column.
 func formatBranchDisplay(branch string) string {
-	if branch == detachedKeyword {
+	if branch == git.DetachedKeyword {
 		return "(detached)"
 	}
 	if branch == "" {
@@ -453,7 +427,7 @@ func formatBranchDisplay(branch string) string {
 func displayWorktreesQuiet(w io.Writer, worktrees []git.Worktree) error {
 	for _, wt := range worktrees {
 		// Omit detached HEAD and empty branch worktrees from quiet output
-		if wt.Branch == detachedKeyword || wt.Branch == "" {
+		if wt.Branch == git.DetachedKeyword || wt.Branch == "" {
 			continue
 		}
 		var name string
@@ -574,7 +548,7 @@ func buildListRows(
 		}
 
 		var pr, ci string
-		if ghAvailable && !wt.IsMain && wt.Branch != detachedKeyword && wt.Branch != "" {
+		if ghAvailable && !wt.IsMain && wt.Branch != git.DetachedKeyword && wt.Branch != "" {
 			if data, ok := prciData[wt.Branch]; ok {
 				pr = data.prFmt
 				ci = data.ciFmt

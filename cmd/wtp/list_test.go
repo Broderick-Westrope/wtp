@@ -6,10 +6,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
@@ -1304,6 +1306,106 @@ branch refs/heads/feature/other
 	})
 }
 
+// TestListCommand_AllSynthesizesArchivedFromState verifies that --all shows
+// archived entries that exist only in state.json (destructive archive removed
+// them from git worktree list entirely).
+func TestListCommand_AllSynthesizesArchivedFromState(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataDir)
+	axdg.Reload()
+
+	oldIsGH := listIsGHAvailable
+	listIsGHAvailable = func() bool { return false }
+	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
+
+	oldGetRemote := listGetRemoteURL
+	listGetRemoteURL = func(_ string) (string, error) {
+		return "https://github.com/owner/repo.git", nil
+	}
+	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
+
+	// Destructively-archived entry: exists in state with full metadata,
+	// but not in git worktree list.
+	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
+	stateStore := state.NewStore()
+	require.NoError(t, stateStore.SetArchivedFull(repoID.StateKey("feature/gone"), &state.WorktreeState{
+		Archived:     true,
+		ArchivedAt:   time.Now(),
+		CommitSHA:    "cafebabe12345678",
+		Branch:       "feature/gone",
+		WorktreePath: "/test/repo/.worktrees/feature/gone",
+	}))
+
+	// Entry for a different repo must not leak into this repo's listing.
+	otherRepoID := remote.RepoIdentifier{Owner: "other", Repo: "repo"}
+	require.NoError(t, stateStore.SetArchivedFull(otherRepoID.StateKey("feature/foreign"), &state.WorktreeState{
+		Archived:  true,
+		CommitSHA: "deadbeef12345678",
+		Branch:    "feature/foreign",
+	}))
+
+	// Git only knows about main — feature/gone was destructively archived.
+	mockOutput := `worktree /test/repo
+HEAD abc123
+branch refs/heads/main
+
+`
+
+	t.Run("with --all, synthesized from state", func(t *testing.T) {
+		mockExec := &mockListCommandExecutor{
+			results: []command.Result{{Output: mockOutput, Error: nil}},
+		}
+		var buf bytes.Buffer
+		cmd := &cli.Command{}
+
+		opts := defaultListDisplayOptionsForTests()
+		opts.ShowAll = true
+		err := listCommandWithCommandExecutor(
+			context.Background(), cmd, &buf, mockExec, "/test/repo", opts,
+		)
+		assert.NoError(t, err)
+		output := buf.String()
+		assert.Contains(t, output, "feature/gone", "destructively archived branch should appear with --all")
+		assert.Contains(t, output, "(archived)", "should show (archived) marker")
+		assert.Contains(t, output, "cafebabe", "should show recorded SHA as HEAD")
+		assert.NotContains(t, output, "feature/foreign", "other repo's entries must not appear")
+	})
+
+	t.Run("without --all, absent", func(t *testing.T) {
+		mockExec := &mockListCommandExecutor{
+			results: []command.Result{{Output: mockOutput, Error: nil}},
+		}
+		var buf bytes.Buffer
+		cmd := &cli.Command{}
+
+		err := listCommandWithCommandExecutor(
+			context.Background(), cmd, &buf, mockExec, "/test/repo",
+			defaultListDisplayOptionsForTests(),
+		)
+		assert.NoError(t, err)
+		assert.NotContains(t, buf.String(), "feature/gone")
+	})
+
+	t.Run("quiet with --all includes bare names", func(t *testing.T) {
+		mockExec := &mockListCommandExecutor{
+			results: []command.Result{{Output: mockOutput, Error: nil}},
+		}
+		var buf bytes.Buffer
+		cmd := &cli.Command{}
+
+		opts := defaultListDisplayOptionsForTests()
+		opts.ShowAll = true
+		opts.Quiet = true
+		err := listCommandWithCommandExecutor(
+			context.Background(), cmd, &buf, mockExec, "/test/repo", opts,
+		)
+		assert.NoError(t, err)
+		output := buf.String()
+		assert.Contains(t, output, "feature/gone\n", "quiet --all should include archived branch as bare name")
+		assert.NotContains(t, output, "(archived)", "quiet output must not include the archived label")
+	})
+}
+
 func TestListCommand_NoSync_SkipsGHCalls(t *testing.T) {
 	ghCallCount := 0
 
@@ -1356,7 +1458,10 @@ branch refs/heads/feature/test
 	assert.Equal(t, 0, ghCallCount, "gh calls should be skipped with --no-sync")
 }
 
-func TestListCommand_AutoArchiveMergedPR(t *testing.T) {
+// TestListCommand_DoesNotAutoArchive verifies that wtp list no longer
+// auto-archives merged PR branches — that responsibility moved to the
+// maintenance system. The merged branch stays visible and state is untouched.
+func TestListCommand_DoesNotAutoArchive(t *testing.T) {
 	dataDir := t.TempDir()
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataDir)
@@ -1417,16 +1522,13 @@ branch refs/heads/feature/merged
 	assert.NoError(t, err)
 	output := buf.String()
 
-	// Auto-archive notice goes to stderr (not captured in buf), so it should NOT be in stdout
-	assert.NotContains(t, output, "Auto-archived", "auto-archive notice should go to stderr, not stdout")
+	// List no longer auto-archives — the merged branch remains visible.
+	assert.Contains(t, output, "feature/merged", "merged branch should still appear in table")
 
-	// The merged branch should NOT appear as a table row (it was auto-archived, showAll=false)
-	assert.NotContains(t, output, "feature/merged", "merged branch should not appear in table")
-
-	// State should be updated
+	// State must be untouched — auto-archive is the maintenance system's job.
 	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
 	stateStore := state.NewStore()
-	assert.True(t, stateStore.IsArchived(repoID.StateKey("feature/merged")))
+	assert.False(t, stateStore.IsArchived(repoID.StateKey("feature/merged")))
 }
 
 func TestListCommand_DetachedHeadWithMarker(t *testing.T) {

@@ -37,7 +37,7 @@ type GlobalConfig struct {
 
 // MarshalYAML serializes GlobalConfig, encoding CacheTTL as a human-readable
 // duration string (e.g. "1m0s").
-func (c GlobalConfig) MarshalYAML() (interface{}, error) {
+func (c GlobalConfig) MarshalYAML() (any, error) {
 	return struct {
 		CacheTTL            string `yaml:"cache_ttl"`
 		ArchiveRetention    string `yaml:"archive_retention"`

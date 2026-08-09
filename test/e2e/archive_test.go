@@ -51,6 +51,20 @@ func TestArchiveWorkflow(t *testing.T) {
 		!strings.Contains(output, "feature/archive-me"),
 		"Archived worktree should be hidden from plain list")
 
+	// Archived entries appear with --all, synthesized from state.json
+	output, err = repo.RunWTP("list", "--all", "--no-sync")
+	framework.AssertNoError(t, err)
+	framework.AssertOutputContains(t, output, "feature/archive-me")
+	framework.AssertOutputContains(t, output, "(archived)")
+
+	// Quiet --all includes the archived branch as a bare name
+	output, err = repo.RunWTP("list", "--quiet", "--all", "--no-sync")
+	framework.AssertNoError(t, err)
+	framework.AssertOutputContains(t, output, "feature/archive-me")
+	framework.AssertTrue(t,
+		!strings.Contains(output, "(archived)"),
+		"Quiet output must not include the archived label")
+
 	// Unarchive the worktree
 	output, err = repo.RunWTP("unarchive", "feature/archive-me")
 	framework.AssertNoError(t, err)

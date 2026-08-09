@@ -126,21 +126,22 @@ func archiveCommandCore(
 		return err
 	}
 
-	if archiveErr := state.PerformArchive(executor, stateStore, key, ws); archiveErr != nil {
+	ws.SuppressAutoArchive = false
+
+	clean, archiveErr := state.PerformArchive(executor, stateStore, key, ws)
+	if archiveErr != nil {
 		return archiveErr
 	}
 
-	// Clear SuppressAutoArchive if set (manual archive = auto-archive should resume)
-	_ = stateStore.WithLock(func(st state.State) (state.State, error) {
-		entry := st.Worktrees[key]
-		if entry.SuppressAutoArchive {
-			entry.SuppressAutoArchive = false
-			st.Worktrees[key] = entry
-		}
-		return st, nil
-	})
+	if clean {
+		_, writeErr := fmt.Fprintf(w, "Archived %s\n", branch)
+		return writeErr
+	}
 
-	_, writeErr := fmt.Fprintf(w, "Archived %s\n", branch)
+	_, writeErr := fmt.Fprintf(w,
+		"Archived %s (state saved, but git cleanup incomplete — run 'wtp archive %s' to retry)\n",
+		branch, branch,
+	)
 	return writeErr
 }
 
@@ -485,7 +486,7 @@ func completeNonArchivedBranches(_ context.Context, _ *cli.Command) {
 	stateStore := state.NewStore()
 
 	for _, wt := range worktrees {
-		if wt.IsMain || wt.Branch == "" || wt.Branch == detachedKeyword {
+		if wt.IsMain || wt.Branch == "" || wt.Branch == git.DetachedKeyword {
 			continue
 		}
 		if repoID != nil {
