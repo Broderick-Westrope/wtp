@@ -134,6 +134,21 @@ go build -o wtp ./cmd/wtp
 sudo mv wtp /usr/local/bin/  # or add to PATH
 ```
 
+### Embedding in a Go Program
+
+The CLI is also available as a library in the `cli` package:
+
+```go
+import wtpcli "github.com/Broderick-Westrope/wtp/v3/cli"
+
+err := wtpcli.Run(ctx, []string{"wtp", "list"}, wtpcli.Env{
+    Dir:    repoDir,
+    Stdout: &stdout,
+    Stderr: &stderr,
+    Self:   []string{"/path/to/host", "wtp"}, // how to re-invoke wtp
+})
+```
+
 ## Quick Start
 
 ### Automatic Path Generation (Recommended)
