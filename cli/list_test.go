@@ -55,7 +55,7 @@ func extractBranchColumnWidth(t *testing.T, output string) int {
 // ===== Command Structure Tests =====
 
 func TestNewListCommand(t *testing.T) {
-	cmd := NewListCommand()
+	cmd := newListCommand()
 
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "list", cmd.Name)
@@ -252,7 +252,7 @@ func TestListCommand_NotInGitRepo(t *testing.T) {
 
 	app := &cli.Command{
 		Commands: []*cli.Command{
-			NewListCommand(),
+			newListCommand(),
 		},
 	}
 
@@ -1181,7 +1181,7 @@ func TestCompleteList_SuggestsQuietFlag(t *testing.T) {
 		os.Args = []string{"wtp", "list", "--q", "--generate-shell-completion"}
 
 		var buf bytes.Buffer
-		cmd := NewListCommand()
+		cmd := newListCommand()
 		cmd.Writer = &buf
 
 		cmd.ShellComplete(context.Background(), cmd)

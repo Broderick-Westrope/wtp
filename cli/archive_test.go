@@ -569,7 +569,7 @@ func TestUnarchiveCommand_NotArchived(t *testing.T) {
 // ===== Command Structure Tests =====
 
 func TestNewArchiveCommand(t *testing.T) {
-	cmd := NewArchiveCommand()
+	cmd := newArchiveCommand()
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "archive", cmd.Name)
 	assert.NotEmpty(t, cmd.Usage)
@@ -579,7 +579,7 @@ func TestNewArchiveCommand(t *testing.T) {
 }
 
 func TestNewUnarchiveCommand(t *testing.T) {
-	cmd := NewUnarchiveCommand()
+	cmd := newUnarchiveCommand()
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "unarchive", cmd.Name)
 	assert.NotEmpty(t, cmd.Usage)

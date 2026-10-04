@@ -114,12 +114,12 @@ func createApp() *cli.Command {
 			},
 		},
 		Commands: []*cli.Command{
-			NewAddCommand(),
-			NewListCommand(),
-			NewRemoveCommand(),
-			NewInitCommand(),
-			NewCdCommand(),
-			NewExecCommand(),
+			newAddCommand(),
+			newListCommand(),
+			newRemoveCommand(),
+			newInitCommand(),
+			newCdCommand(),
+			newExecCommand(),
 			// NewCompletionCommand(), // Using built-in completion
 		},
 	}

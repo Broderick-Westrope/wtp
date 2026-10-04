@@ -205,7 +205,7 @@ func TestCdCommand_EdgeCases(t *testing.T) {
 
 // Only test command structure that affects user behavior
 func TestCdCommand_CoreBehavior(t *testing.T) {
-	cmd := NewCdCommand()
+	cmd := newCdCommand()
 	assert.Equal(t, "cd", cmd.Name)
 	assert.Equal(t, "Output absolute path to worktree", cmd.Usage)
 	assert.NotNil(t, cmd.ShellComplete)

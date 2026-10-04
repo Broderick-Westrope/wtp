@@ -24,8 +24,8 @@ import (
 var doctorGetwd = getwd
 var doctorIsGHAvailable = github.IsAvailable
 
-// NewDoctorCommand creates the doctor command.
-func NewDoctorCommand() *cli.Command {
+// newDoctorCommand creates the doctor command.
+func newDoctorCommand() *cli.Command {
 	return &cli.Command{
 		Name:        "doctor",
 		Usage:       "Diagnose common wtp issues",

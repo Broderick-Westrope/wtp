@@ -18,7 +18,7 @@ import (
 // ===== Command Structure Tests =====
 
 func TestNewDoctorCommand(t *testing.T) {
-	cmd := NewDoctorCommand()
+	cmd := newDoctorCommand()
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "doctor", cmd.Name)
 	assert.NotEmpty(t, cmd.Usage)

@@ -18,8 +18,8 @@ const configFileMode = 0o600
 var osGetwd = getwd
 var writeFile = os.WriteFile
 
-// NewInitCommand creates the init command definition
-func NewInitCommand() *cli.Command {
+// newInitCommand creates the init command definition
+func newInitCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "init",
 		Usage: "Initialize configuration file",

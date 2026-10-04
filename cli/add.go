@@ -25,8 +25,8 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
 
-// NewAddCommand creates the add command definition
-func NewAddCommand() *cli.Command {
+// newAddCommand creates the add command definition
+func newAddCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "add",
 		Usage:     "Create a new worktree",

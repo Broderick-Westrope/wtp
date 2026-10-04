@@ -25,8 +25,8 @@ import (
 // Variable to allow mocking in tests
 var removeGetwd = getwd
 
-// NewRemoveCommand creates the remove command definition
-func NewRemoveCommand() *cli.Command {
+// newRemoveCommand creates the remove command definition
+func newRemoveCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "remove",
 		Aliases:   []string{"rm"},

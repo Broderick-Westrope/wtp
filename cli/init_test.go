@@ -16,7 +16,7 @@ import (
 )
 
 func TestNewInitCommand(t *testing.T) {
-	cmd := NewInitCommand()
+	cmd := newInitCommand()
 
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "init", cmd.Name)
@@ -39,7 +39,7 @@ func TestInitCommand_NotInGitRepo(t *testing.T) {
 
 	app := &cli.Command{
 		Commands: []*cli.Command{
-			NewInitCommand(),
+			newInitCommand(),
 		},
 	}
 
@@ -74,7 +74,7 @@ func TestInitCommand_ConfigAlreadyExists(t *testing.T) {
 
 	app := &cli.Command{
 		Commands: []*cli.Command{
-			NewInitCommand(),
+			newInitCommand(),
 		},
 	}
 
@@ -104,7 +104,7 @@ func TestInitCommand_Success(t *testing.T) {
 
 	app := &cli.Command{
 		Commands: []*cli.Command{
-			NewInitCommand(),
+			newInitCommand(),
 		},
 	}
 
@@ -163,7 +163,7 @@ func TestInitCommand_DirectoryAccessError(t *testing.T) {
 		return "", assert.AnError
 	}
 
-	cmd := NewInitCommand()
+	cmd := newInitCommand()
 	ctx := context.Background()
 	err := cmd.Action(ctx, &cli.Command{})
 
@@ -194,7 +194,7 @@ func TestInitCommand_WriteFileError(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	cmd := NewInitCommand()
+	cmd := newInitCommand()
 	ctx := context.Background()
 	err = cmd.Action(ctx, &cli.Command{})
 

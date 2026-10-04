@@ -33,8 +33,8 @@ type gitQuerier interface {
 	GetMainWorktreePath() (string, error)
 }
 
-// NewArchiveCommand creates the archive command.
-func NewArchiveCommand() *cli.Command {
+// newArchiveCommand creates the archive command.
+func newArchiveCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "archive",
 		Usage:     "Archive a worktree (removes worktree and branch, records recovery metadata)",
@@ -254,8 +254,8 @@ func validateArchiveSafety(
 	return nil
 }
 
-// NewUnarchiveCommand creates the unarchive command.
-func NewUnarchiveCommand() *cli.Command {
+// newUnarchiveCommand creates the unarchive command.
+func newUnarchiveCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "unarchive",
 		Usage:     "Restore an archived worktree from recorded metadata",

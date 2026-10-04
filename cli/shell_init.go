@@ -42,8 +42,8 @@ func runCompletionCommand(ctx context.Context, shell string) ([]byte, error) {
 	return execCompletion(ctx, argv)
 }
 
-// NewShellInitCommand creates the shell-init command definition
-func NewShellInitCommand() *cli.Command {
+// newShellInitCommand creates the shell-init command definition
+func newShellInitCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "shell-init",
 		Usage: "Initialize shell with completion and cd functionality",

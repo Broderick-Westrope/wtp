@@ -18,7 +18,7 @@ import (
 // ===== Command Structure Tests =====
 
 func TestNewRemoveCommand(t *testing.T) {
-	cmd := NewRemoveCommand()
+	cmd := newRemoveCommand()
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "remove", cmd.Name)
 	assert.Contains(t, cmd.Aliases, "rm")
@@ -344,7 +344,7 @@ func TestRemoveCommand_ValidationErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			app := &cli.Command{
 				Commands: []*cli.Command{
-					NewRemoveCommand(),
+					newRemoveCommand(),
 				},
 			}
 
@@ -368,7 +368,7 @@ func TestRemoveCommand_NotInGitRepo(t *testing.T) {
 
 	app := &cli.Command{
 		Commands: []*cli.Command{
-			NewRemoveCommand(),
+			newRemoveCommand(),
 		},
 	}
 

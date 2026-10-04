@@ -74,8 +74,8 @@ var (
 	listGetCIStatus    = github.GetCIStatus
 )
 
-// NewListCommand creates the list command definition
-func NewListCommand() *cli.Command {
+// newListCommand creates the list command definition
+func newListCommand() *cli.Command {
 	return &cli.Command{
 		Name:          "list",
 		Aliases:       []string{"ls"},

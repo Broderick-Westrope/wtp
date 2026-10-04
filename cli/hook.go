@@ -8,8 +8,8 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// NewHookCommand creates the hook command definition
-func NewHookCommand() *cli.Command {
+// newHookCommand creates the hook command definition
+func newHookCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "hook",
 		Usage: "Generate shell hook for cd and auto-cd functionality",

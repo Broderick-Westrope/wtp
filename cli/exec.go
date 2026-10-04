@@ -14,8 +14,8 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
-// NewExecCommand creates the exec command definition.
-func NewExecCommand() *cli.Command {
+// newExecCommand creates the exec command definition.
+func newExecCommand() *cli.Command {
 	return &cli.Command{
 		Name:          "exec",
 		Usage:         "Execute a command in a specified worktree",

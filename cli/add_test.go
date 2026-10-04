@@ -44,7 +44,7 @@ func noOriginRemote() func(string) (string, error) {
 // ===== Command Structure Tests =====
 
 func TestNewAddCommand(t *testing.T) {
-	cmd := NewAddCommand()
+	cmd := newAddCommand()
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "add", cmd.Name)
 	assert.Equal(t, "Create a new worktree", cmd.Usage)

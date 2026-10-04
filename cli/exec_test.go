@@ -13,7 +13,7 @@ import (
 )
 
 func TestNewExecCommand(t *testing.T) {
-	cmd := NewExecCommand()
+	cmd := newExecCommand()
 	assert.Equal(t, "exec", cmd.Name)
 	assert.NotNil(t, cmd.Action)
 	assert.NotNil(t, cmd.ShellComplete)

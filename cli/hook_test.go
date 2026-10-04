@@ -22,7 +22,7 @@ func findSubcommand(cmd *cli.Command, name string) *cli.Command {
 
 // Focus on what matters: command behavior, not structure
 func TestNewHookCommand_SupportedShells(t *testing.T) {
-	cmd := NewHookCommand()
+	cmd := newHookCommand()
 	assert.Equal(t, "hook", cmd.Name)
 
 	// What matters: all required shells are supported
@@ -84,7 +84,7 @@ func TestHookCommand_GeneratesValidShellScripts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			app := &cli.Command{
 				Commands: []*cli.Command{
-					NewHookCommand(),
+					newHookCommand(),
 				},
 			}
 

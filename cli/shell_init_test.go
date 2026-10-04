@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewShellInitCommand(t *testing.T) {
-	cmd := NewShellInitCommand()
+	cmd := newShellInitCommand()
 
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "shell-init", cmd.Name)
@@ -65,7 +65,7 @@ func TestShellInitCommand_OutputsValidScripts(t *testing.T) {
 			var buf bytes.Buffer
 			app := &cli.Command{
 				Commands: []*cli.Command{
-					NewShellInitCommand(),
+					newShellInitCommand(),
 				},
 				Writer: &buf,
 			}

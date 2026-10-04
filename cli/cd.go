@@ -18,8 +18,8 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
-// NewCdCommand creates the cd command definition
-func NewCdCommand() *cli.Command {
+// newCdCommand creates the cd command definition
+func newCdCommand() *cli.Command {
 	return &cli.Command{
 		Name:  "cd",
 		Usage: "Output absolute path to worktree",
