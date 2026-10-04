@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -26,8 +25,8 @@ func NewExecCommand() *cli.Command {
 	}
 }
 
-func execCommand(_ context.Context, cmd *cli.Command) error {
-	cwd, err := os.Getwd()
+func execCommand(ctx context.Context, cmd *cli.Command) error {
+	cwd, err := getwd(ctx)
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -37,10 +36,7 @@ func execCommand(_ context.Context, cmd *cli.Command) error {
 		return errors.NotInGitRepository()
 	}
 
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := stdoutFor(ctx, cmd)
 
 	executor := command.NewRealExecutor()
 	return execCommandWithCommandExecutor(cmd, w, executor)
@@ -136,7 +132,7 @@ func parseExecInput(args []string) (worktreeName, commandName string, commandArg
 
 func completeWorktreesForExec(ctx context.Context, cmd *cli.Command) {
 	current, previous := completionArgsFromCommand(cmd)
-	if maybeCompleteFlagSuggestions(cmd, current, previous) {
+	if maybeCompleteFlagSuggestions(ctx, cmd, current, previous) {
 		return
 	}
 

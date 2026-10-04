@@ -25,6 +25,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 	"github.com/Broderick-Westrope/wtp/v3/internal/github"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
@@ -48,7 +49,7 @@ type worktreePRCI struct {
 
 // Variables to allow mocking in tests
 var (
-	listGetwd        = os.Getwd
+	listGetwd        = getwd
 	listNewGitRepo   = git.NewRepository
 	listGetRemoteURL = func(mainRepoPath string) (string, error) {
 		repo, err := git.NewRepository(mainRepoPath)
@@ -58,9 +59,12 @@ var (
 		return repo.GetRemoteURL("origin")
 	}
 	listNewExecutor  = command.NewRealExecutor
-	getTerminalWidth = func() int {
-		width, _, err := term.GetSize(int(os.Stdout.Fd()))
-		if err != nil || width <= 0 {
+	getTerminalWidth = func(ctx context.Context) int {
+		width := 0
+		if file, ok := procenv.From(ctx).Stdout.(*os.File); ok {
+			width, _, _ = term.GetSize(int(file.Fd()))
+		}
+		if width <= 0 {
 			return 80 //nolint:mnd // Default terminal width
 		}
 		return width
@@ -109,7 +113,7 @@ func NewListCommand() *cli.Command {
 }
 
 func listCommand(ctx context.Context, cmd *cli.Command) error {
-	cwd, err := listGetwd()
+	cwd, err := listGetwd(ctx)
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -124,12 +128,9 @@ func listCommand(ctx context.Context, cmd *cli.Command) error {
 		return errors.GitCommandFailed("get main worktree path", err.Error())
 	}
 
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := stdoutFor(ctx, cmd)
 
-	opts := resolveListDisplayOptions(cmd, w)
+	opts := resolveListDisplayOptions(ctx, cmd, w)
 	opts.Quiet = cmd.Bool("quiet")
 	opts.ShowAll = cmd.Bool("all")
 	opts.NoSync = cmd.Bool("no-sync")
@@ -142,7 +143,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	ctx context.Context, _ *cli.Command, w io.Writer, executor command.Executor, mainRepoPath string,
 	opts listDisplayOptions,
 ) error {
-	cwd, err := listGetwd()
+	cwd, err := listGetwd(ctx)
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -216,14 +217,14 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 			return err
 		}
 	} else if !ghAvailable && !opts.Quiet {
-		maybeShowGHNotAvailableHint()
+		maybeShowGHNotAvailableHint(stderrFor(ctx))
 	}
 
 	if opts.Quiet {
 		return displayWorktreesQuiet(w, displayWorktrees)
 	}
 
-	termWidth := getTerminalWidth()
+	termWidth := getTerminalWidth(ctx)
 	if !opts.Compact && !opts.OutputIsTTY {
 		// Redirected output gets the borderless compact format for easier parsing.
 		opts.Compact = true
@@ -363,7 +364,7 @@ func fetchPRCIData(
 	}
 
 	if count := shared.errorCount.Load(); count > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: failed to fetch PR/CI status for %d branch(es)\n", count)
+		_, _ = fmt.Fprintf(stderrFor(ctx), "warning: failed to fetch PR/CI status for %d branch(es)\n", count)
 	}
 
 	_ = cacheStore.SetBatch(shared.newEntries)
@@ -406,9 +407,9 @@ func appendArchivedEntries(
 }
 
 // completeList provides shell completion for the list command (flags only)
-func completeList(_ context.Context, cmd *cli.Command) {
+func completeList(ctx context.Context, cmd *cli.Command) {
 	current, previous := completionArgsFromCommand(cmd)
-	maybeCompleteFlagSuggestions(cmd, current, previous)
+	maybeCompleteFlagSuggestions(ctx, cmd, current, previous)
 }
 
 // formatBranchDisplay formats branch name for display in the BRANCH column.
@@ -587,12 +588,12 @@ func truncateStr(s string, maxWidth int) string {
 }
 
 // maybeShowGHNotAvailableHint shows a one-time hint about the gh CLI being unavailable.
-func maybeShowGHNotAvailableHint() {
+func maybeShowGHNotAvailableHint(errW io.Writer) {
 	hintFile := filepath.Join(xdg.WtpDataDir(), ghHintFileName)
 	if _, err := os.Stat(hintFile); err == nil {
 		return // already shown
 	}
-	_, _ = fmt.Fprintln(os.Stderr, "hint: install 'gh' CLI for PR/CI status in wtp list")
+	_, _ = fmt.Fprintln(errW, "hint: install 'gh' CLI for PR/CI status in wtp list")
 	_ = xdg.EnsureDir(xdg.WtpDataDir())
 	_ = os.WriteFile(hintFile, []byte{}, 0o644) //nolint:gosec,mnd // hint file, world-readable is fine
 }
@@ -606,10 +607,10 @@ type listDisplayOptions struct {
 	NoSync       bool
 }
 
-func resolveListDisplayOptions(cmd *cli.Command, w io.Writer) listDisplayOptions {
+func resolveListDisplayOptions(ctx context.Context, cmd *cli.Command, w io.Writer) listDisplayOptions {
 	maxPathWidth := cmd.Int("max-branch-width")
 	if maxPathWidth == defaultMaxPathWidth && !cmd.IsSet("max-branch-width") && !cmd.IsSet("max-path-width") {
-		if envValue := os.Getenv("WTP_LIST_MAX_PATH"); envValue != "" {
+		if envValue := procenv.From(ctx).Getenv("WTP_LIST_MAX_PATH"); envValue != "" {
 			if parsed, err := strconv.Atoi(envValue); err == nil && parsed > 0 {
 				maxPathWidth = parsed
 			}
@@ -621,10 +622,7 @@ func resolveListDisplayOptions(cmd *cli.Command, w io.Writer) listDisplayOptions
 
 	compact := cmd.Bool("compact")
 
-	outputIsTTY := false
-	if file, ok := w.(*os.File); ok {
-		outputIsTTY = term.IsTerminal(int(file.Fd()))
-	}
+	outputIsTTY := procenv.IsTerminal(w)
 
 	return listDisplayOptions{
 		Compact:      compact,

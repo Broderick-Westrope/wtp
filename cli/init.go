@@ -16,7 +16,7 @@ import (
 const configFileMode = 0o600
 
 // Variable to allow mocking in tests
-var osGetwd = os.Getwd
+var osGetwd = getwd
 var writeFile = os.WriteFile
 
 // NewInitCommand creates the init command definition
@@ -30,9 +30,9 @@ func NewInitCommand() *cli.Command {
 	}
 }
 
-func initCommand(_ context.Context, cmd *cli.Command) error {
+func initCommand(ctx context.Context, cmd *cli.Command) error {
 	// Get current working directory (should be a git repository)
-	cwd, err := osGetwd()
+	cwd, err := osGetwd(ctx)
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -85,10 +85,7 @@ func initCommand(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Get the writer from cli.Command
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := stdoutFor(ctx, cmd)
 
 	if _, printErr := fmt.Fprintf(w, "Configuration file created: %s\n", configPath); printErr != nil {
 		return printErr

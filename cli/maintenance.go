@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"io"
-	"os"
 	"time"
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/config"
@@ -17,14 +16,14 @@ const maintenanceTimeout = 30 * time.Second
 
 // Variables to allow mocking in tests.
 var (
-	maintGetwd      = os.Getwd
+	maintGetwd      = getwd
 	maintNewGitRepo = git.NewRepository
 )
 
 // runMaintenance executes cheap and expensive maintenance for the current repo.
 // Errors are non-fatal: the function always returns nil so the user's command proceeds.
 func runMaintenance(ctx context.Context, w io.Writer) error {
-	cwd, err := maintGetwd()
+	cwd, err := maintGetwd(ctx)
 	if err != nil {
 		return nil //nolint:nilerr // not in usable dir — skip silently
 	}

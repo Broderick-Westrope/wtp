@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/urfave/cli/v3"
 )
@@ -44,27 +43,18 @@ func NewHookCommand() *cli.Command {
 	}
 }
 
-func hookBash(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func hookBash(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 	return printBashHook(w)
 }
 
-func hookZsh(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func hookZsh(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 	return printZshHook(w)
 }
 
-func hookFish(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func hookFish(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 	return printFishHook(w)
 }
 

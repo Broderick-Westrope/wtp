@@ -1,14 +1,15 @@
 package cli
 
 import (
+	"context"
 	"fmt"
-	"io"
-	"os"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/urfave/cli/v3"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 const (
@@ -16,12 +17,12 @@ const (
 	sentinelArgOffset = 2
 )
 
-func completeFlagSuggestions(cmd *cli.Command, current string) bool {
+func completeFlagSuggestions(ctx context.Context, cmd *cli.Command, current string) bool {
 	if cmd == nil {
 		return false
 	}
 
-	writer := commandWriter(cmd)
+	writer := stdoutFor(ctx, cmd)
 
 	trimmed, doubleDash := normalizeCurrent(current)
 	if trimmed == "" && !strings.HasPrefix(current, "-") {
@@ -54,14 +55,6 @@ func completeFlagSuggestions(cmd *cli.Command, current string) bool {
 	}
 
 	return emitted
-}
-
-func commandWriter(cmd *cli.Command) io.Writer {
-	writer := cmd.Root().Writer
-	if writer == nil {
-		return os.Stdout
-	}
-	return writer
 }
 
 func normalizeCurrent(current string) (trimmed string, doubleDash bool) {
@@ -108,29 +101,29 @@ func formatCompletion(name string) string {
 	return strings.Repeat("-", count) + name
 }
 
-func tryFlagCompletion(cmd *cli.Command, candidate string) bool {
+func tryFlagCompletion(ctx context.Context, cmd *cli.Command, candidate string) bool {
 	if strings.HasPrefix(candidate, "-") {
-		return completeFlagSuggestions(cmd, candidate)
+		return completeFlagSuggestions(ctx, cmd, candidate)
 	}
 	return false
 }
 
-func maybeCompleteFlagSuggestions(cmd *cli.Command, current string, previous []string) bool {
+func maybeCompleteFlagSuggestions(ctx context.Context, cmd *cli.Command, current string, previous []string) bool {
 	currentNormalized := strings.TrimSuffix(current, "*")
-	if currentNormalized != "" && tryFlagCompletion(cmd, currentNormalized) {
+	if currentNormalized != "" && tryFlagCompletion(ctx, cmd, currentNormalized) {
 		return true
 	}
 
 	if len(previous) > 0 {
 		last := strings.TrimSuffix(previous[len(previous)-1], "*")
 		// Sentinel separating flags from positionals; ignore for flag completion.
-		if last != "" && last != "-" && last != "--" && last != currentNormalized && tryFlagCompletion(cmd, last) {
+		if last != "" && last != "-" && last != "--" && last != currentNormalized && tryFlagCompletion(ctx, cmd, last) {
 			return true
 		}
 	}
 
-	if candidate, ok := flagCandidateFromOSArgs(); ok {
-		if candidate != "" && candidate != currentNormalized && tryFlagCompletion(cmd, candidate) {
+	if candidate, ok := flagCandidateFromArgs(procenv.From(ctx).Args); ok {
+		if candidate != "" && candidate != currentNormalized && tryFlagCompletion(ctx, cmd, candidate) {
 			return true
 		}
 	}
@@ -138,19 +131,18 @@ func maybeCompleteFlagSuggestions(cmd *cli.Command, current string, previous []s
 	return false
 }
 
-func flagCandidateFromOSArgs() (string, bool) {
-	index := slices.Index(os.Args, completionFlag)
-	if index <= 0 {
+func flagCandidateFromArgs(args []string) (string, bool) {
+	preceding := args[:max(slices.Index(args, completionFlag), 0)]
+	if len(preceding) == 0 {
 		return "", false
 	}
 
-	candidate := os.Args[index-1]
+	candidate := preceding[len(preceding)-1]
 	if candidate == "-" || candidate == "--" {
-		if index >= sentinelArgOffset {
-			candidate = os.Args[index-2]
-		} else {
+		if len(preceding) < sentinelArgOffset {
 			return "", false
 		}
+		candidate = preceding[len(preceding)-sentinelArgOffset]
 	}
 
 	if candidate == completionFlag {

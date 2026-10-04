@@ -3,12 +3,13 @@ package cli
 import (
 	"bytes"
 	"io"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 func TestCompleteFlagSuggestions_MatchesLongFlag(t *testing.T) {
@@ -28,7 +29,7 @@ func TestCompleteFlagSuggestions_MatchesLongFlag(t *testing.T) {
 		},
 	}
 
-	require.True(t, completeFlagSuggestions(cmd, "--k"))
+	require.True(t, completeFlagSuggestions(t.Context(), cmd, "--k"))
 
 	require.Contains(t, buf.String(), "--keep-branch")
 	require.NotContains(t, buf.String(), "--generate-shell-completion")
@@ -50,7 +51,7 @@ func TestCompleteFlagSuggestions_ShowsAllForSingleHyphen(t *testing.T) {
 		},
 	}
 
-	require.True(t, completeFlagSuggestions(cmd, "-"))
+	require.True(t, completeFlagSuggestions(t.Context(), cmd, "-"))
 
 	output := buf.String()
 	require.True(t, strings.Contains(output, "--keep-branch") || strings.Contains(output, "-keep-branch"))
@@ -66,7 +67,7 @@ func TestMaybeCompleteFlagSuggestions_IgnoresPreviousWhenCurrentEmpty(t *testing
 		},
 	}
 
-	require.False(t, maybeCompleteFlagSuggestions(cmd, "", []string{"--force"}))
+	require.False(t, maybeCompleteFlagSuggestions(t.Context(), cmd, "", []string{"--force"}))
 }
 
 func TestMaybeCompleteFlagSuggestions_IgnoresSentinelInPrevious(t *testing.T) {
@@ -78,35 +79,30 @@ func TestMaybeCompleteFlagSuggestions_IgnoresSentinelInPrevious(t *testing.T) {
 		},
 	}
 
-	require.False(t, maybeCompleteFlagSuggestions(cmd, "feature", []string{"-"}))
-	require.False(t, maybeCompleteFlagSuggestions(cmd, "", []string{"-"}))
+	require.False(t, maybeCompleteFlagSuggestions(t.Context(), cmd, "feature", []string{"-"}))
+	require.False(t, maybeCompleteFlagSuggestions(t.Context(), cmd, "", []string{"-"}))
 }
 
-func TestFlagCandidateFromOSArgsSentinel(t *testing.T) {
-	original := os.Args
-	t.Cleanup(func() { os.Args = original })
-
-	os.Args = []string{"wtp", "remove", "target", "-", "--generate-shell-completion"}
-	candidate, ok := flagCandidateFromOSArgs()
+func TestFlagCandidateFromArgsSentinel(t *testing.T) {
+	candidate, ok := flagCandidateFromArgs([]string{"wtp", "remove", "target", "-", "--generate-shell-completion"})
 	require.True(t, ok)
 	require.Equal(t, "target", candidate)
 
-	os.Args = []string{"wtp", "remove", "target", "--", "--generate-shell-completion"}
-	candidate, ok = flagCandidateFromOSArgs()
+	candidate, ok = flagCandidateFromArgs([]string{"wtp", "remove", "target", "--", "--generate-shell-completion"})
 	require.True(t, ok)
 	require.Equal(t, "target", candidate)
 
-	os.Args = []string{"wtp", "remove", "target", "-", "--generate-shell-completion", "--generate-shell-completion"}
-	candidate, ok = flagCandidateFromOSArgs()
+	candidate, ok = flagCandidateFromArgs(
+		[]string{"wtp", "remove", "target", "-", "--generate-shell-completion", "--generate-shell-completion"},
+	)
 	require.True(t, ok)
 	require.Equal(t, "target", candidate)
 }
 
-func TestMaybeCompleteFlagSuggestions_UsesOSArgsWhenCurrentEmpty(t *testing.T) {
-	original := os.Args
-	t.Cleanup(func() { os.Args = original })
-
-	os.Args = []string{"wtp", "remove", "--k", "--generate-shell-completion"}
+func TestMaybeCompleteFlagSuggestions_UsesInvocationArgsWhenCurrentEmpty(t *testing.T) {
+	ctx := procenv.WithEnv(t.Context(), &procenv.Env{
+		Args: []string{"wtp", "remove", "--k", "--generate-shell-completion"},
+	})
 
 	var buf bytes.Buffer
 	cmd := &cli.Command{
@@ -118,6 +114,6 @@ func TestMaybeCompleteFlagSuggestions_UsesOSArgsWhenCurrentEmpty(t *testing.T) {
 		},
 	}
 
-	require.True(t, maybeCompleteFlagSuggestions(cmd, "", nil))
+	require.True(t, maybeCompleteFlagSuggestions(ctx, cmd, "", nil))
 	require.Contains(t, buf.String(), "--keep-branch")
 }

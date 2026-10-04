@@ -159,7 +159,7 @@ func TestInitCommand_DirectoryAccessError(t *testing.T) {
 	defer func() { osGetwd = originalGetwd }()
 
 	// Mock os.Getwd to return an error
-	osGetwd = func() (string, error) {
+	osGetwd = func(context.Context) (string, error) {
 		return "", assert.AnError
 	}
 

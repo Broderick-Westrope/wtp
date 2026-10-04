@@ -8,12 +8,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 func TestNormalizeCompletionArgs(t *testing.T) {
 	t.Run("keeps trailing sentinel untouched", func(t *testing.T) {
 		args := []string{"wtp", "remove", "target", "--", "--generate-shell-completion"}
-		got := normalizeCompletionArgs(args)
+		got := normalizeCompletionArgs(procenv.WithEnv(t.Context(), &procenv.Env{}), args)
 		want := []string{"wtp", "remove", "target", "--", "--generate-shell-completion"}
 
 		if !reflect.DeepEqual(got, want) {
@@ -22,9 +24,9 @@ func TestNormalizeCompletionArgs(t *testing.T) {
 	})
 
 	t.Run("converts trailing sentinel in completion context", func(t *testing.T) {
-		t.Setenv("COMP_LINE", "wtp remove target --")
+		ctx := procenv.WithEnv(t.Context(), &procenv.Env{Environ: []string{"COMP_LINE=wtp remove target --"}})
 		args := []string{"wtp", "remove", "target", "--", "--generate-shell-completion"}
-		got := normalizeCompletionArgs(args)
+		got := normalizeCompletionArgs(ctx, args)
 		want := []string{"wtp", "remove", "target", "-", "--generate-shell-completion"}
 
 		if !reflect.DeepEqual(got, want) {
@@ -34,7 +36,7 @@ func TestNormalizeCompletionArgs(t *testing.T) {
 
 	t.Run("keeps completion flag before positional arguments", func(t *testing.T) {
 		args := []string{"wtp", "remove", "--generate-shell-completion", "target"}
-		got := normalizeCompletionArgs(args)
+		got := normalizeCompletionArgs(procenv.WithEnv(t.Context(), &procenv.Env{}), args)
 		want := []string{"wtp", "remove", "--generate-shell-completion", "target"}
 
 		if !reflect.DeepEqual(got, want) {
@@ -44,7 +46,7 @@ func TestNormalizeCompletionArgs(t *testing.T) {
 
 	t.Run("keeps arguments untouched when no normalization is needed", func(t *testing.T) {
 		args := []string{"wtp", "remove", "target", "--generate-shell-completion"}
-		got := normalizeCompletionArgs(args)
+		got := normalizeCompletionArgs(procenv.WithEnv(t.Context(), &procenv.Env{}), args)
 
 		if !reflect.DeepEqual(got, args) {
 			t.Fatalf("normalizeCompletionArgs() = %v, want %v", got, args)
@@ -175,7 +177,7 @@ func generateCompletionScript(t *testing.T, shell string) string {
 		os.Stderr = oldStderr
 	}()
 
-	args := normalizeCompletionArgs([]string{"wtp", "completion", shell})
+	args := normalizeCompletionArgs(context.Background(), []string{"wtp", "completion", shell})
 	runErr := app.Run(context.Background(), args)
 	if closeErr := w.Close(); closeErr != nil {
 		t.Fatalf("failed to close writer: %v", closeErr)

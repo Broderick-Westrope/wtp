@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"os"
 
 	"github.com/urfave/cli/v3"
 )
@@ -21,7 +20,7 @@ func newApp() *cli.Command {
 			case "shell-init", "hook", "completion":
 				return ctx, nil
 			}
-			_ = runMaintenance(ctx, os.Stderr)
+			_ = runMaintenance(ctx, stderrFor(ctx))
 			return ctx, nil
 		},
 		Flags: []cli.Flag{

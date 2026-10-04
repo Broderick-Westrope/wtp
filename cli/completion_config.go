@@ -3,10 +3,11 @@ package cli
 import (
 	"bytes"
 	"context"
-	"os"
 	"strings"
 
 	"github.com/urfave/cli/v3"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 const completionFlag = "--generate-shell-completion"
@@ -20,11 +21,7 @@ func configureCompletionCommand(cmd *cli.Command) {
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
 		writer := c.Writer
 		if writer == nil {
-			if root := c.Root(); root != nil && root.Writer != nil {
-				writer = root.Writer
-			} else {
-				writer = os.Stdout
-			}
+			writer = stdoutFor(ctx, c)
 		}
 
 		var buf bytes.Buffer
@@ -173,7 +170,7 @@ _wtp_sanitize_completion_list() {
 	return script
 }
 
-func normalizeCompletionArgs(args []string) []string {
+func normalizeCompletionArgs(ctx context.Context, args []string) []string {
 	flagIndex := -1
 	for i, arg := range args {
 		if arg == completionFlag {
@@ -188,7 +185,7 @@ func normalizeCompletionArgs(args []string) []string {
 
 	normalized := append([]string(nil), args...)
 
-	if flagIndex > 0 && normalized[flagIndex-1] == "--" && inShellCompletionContext() {
+	if flagIndex > 0 && normalized[flagIndex-1] == "--" && inShellCompletionContext(ctx) {
 		normalized[flagIndex-1] = "-"
 	}
 
@@ -233,15 +230,12 @@ func filterCompletionArgs(args []string) []string {
 	return filtered
 }
 
-func inShellCompletionContext() bool {
-	if os.Getenv("WTP_SHELL_COMPLETION") != "" {
-		return true
-	}
-	if os.Getenv("COMP_LINE") != "" {
-		return true
-	}
-	if os.Getenv("COMP_POINT") != "" {
-		return true
+func inShellCompletionContext(ctx context.Context) bool {
+	env := procenv.From(ctx)
+	for _, key := range []string{"WTP_SHELL_COMPLETION", "COMP_LINE", "COMP_POINT"} {
+		if env.Getenv(key) != "" {
+			return true
+		}
 	}
 	return false
 }

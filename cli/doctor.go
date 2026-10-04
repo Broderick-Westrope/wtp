@@ -20,7 +20,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
 
-var doctorGetwd = os.Getwd
+var doctorGetwd = getwd
 var doctorIsGHAvailable = github.IsAvailable
 
 // NewDoctorCommand creates the doctor command.
@@ -33,13 +33,10 @@ func NewDoctorCommand() *cli.Command {
 	}
 }
 
-func doctorCommand(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func doctorCommand(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 
-	cwd, err := doctorGetwd()
+	cwd, err := doctorGetwd(ctx)
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
+	"slices"
 
 	"github.com/urfave/cli/v3"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 var allowedShells = map[string]struct{}{
@@ -16,20 +18,26 @@ var allowedShells = map[string]struct{}{
 	"fish": {},
 }
 
-var runCompletionCommand = func(shell string) ([]byte, error) {
+var execCompletion = func(ctx context.Context, argv []string) ([]byte, error) {
+	env := procenv.From(ctx)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = env.Dir
+	cmd.Env = env.Environ
+	return cmd.Output()
+}
+
+func runCompletionCommand(ctx context.Context, shell string) ([]byte, error) {
 	if _, ok := allowedShells[shell]; !ok {
 		return nil, fmt.Errorf("unsupported shell: %s", shell)
 	}
 
-	exe, err := os.Executable()
-	if err != nil {
-		// Fallback to "wtp" if we can't find the executable
-		exe = "wtp"
+	self := procenv.From(ctx).Self
+	if len(self) == 0 {
+		self = []string{"wtp"}
 	}
 
-	// #nosec G204 -- exe comes from the running binary and shell is validated above
-	cmd := exec.Command(exe, "completion", shell)
-	return cmd.Output()
+	argv := append(slices.Clone(self), "completion", shell)
+	return execCompletion(ctx, argv)
 }
 
 // NewShellInitCommand creates the shell-init command definition
@@ -66,14 +74,11 @@ func NewShellInitCommand() *cli.Command {
 	}
 }
 
-func shellInitBash(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func shellInitBash(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 
 	// Output completion first
-	if err := outputCompletion(w, "bash"); err != nil {
+	if err := outputCompletion(ctx, w, "bash"); err != nil {
 		return err
 	}
 
@@ -85,14 +90,11 @@ func shellInitBash(_ context.Context, cmd *cli.Command) error {
 	return printBashHook(w)
 }
 
-func shellInitZsh(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func shellInitZsh(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 
 	// Output completion first
-	if err := outputCompletion(w, "zsh"); err != nil {
+	if err := outputCompletion(ctx, w, "zsh"); err != nil {
 		return err
 	}
 
@@ -104,14 +106,11 @@ func shellInitZsh(_ context.Context, cmd *cli.Command) error {
 	return printZshHook(w)
 }
 
-func shellInitFish(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func shellInitFish(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 
 	// Output completion first
-	if err := outputCompletion(w, "fish"); err != nil {
+	if err := outputCompletion(ctx, w, "fish"); err != nil {
 		return err
 	}
 
@@ -124,9 +123,8 @@ func shellInitFish(_ context.Context, cmd *cli.Command) error {
 }
 
 // outputCompletion executes wtp completion command and writes output to w
-
-func outputCompletion(w io.Writer, shell string) error {
-	output, err := runCompletionCommand(shell)
+func outputCompletion(ctx context.Context, w io.Writer, shell string) error {
+	output, err := runCompletionCommand(ctx, shell)
 	if err != nil {
 		return fmt.Errorf("failed to generate %s completion: %w", shell, err)
 	}

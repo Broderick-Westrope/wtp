@@ -204,7 +204,7 @@ func TestListCommand_Output(t *testing.T) {
 			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 			oldGetwd := listGetwd
-			listGetwd = func() (string, error) {
+			listGetwd = func(context.Context) (string, error) {
 				return "/path/to", nil
 			}
 			t.Cleanup(func() { listGetwd = oldGetwd })
@@ -343,7 +343,7 @@ func TestListCommand_InternationalCharacters(t *testing.T) {
 			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 			oldGetwd := listGetwd
-			listGetwd = func() (string, error) {
+			listGetwd = func(context.Context) (string, error) {
 				return "/tmp", nil
 			}
 			t.Cleanup(func() { listGetwd = oldGetwd })
@@ -403,7 +403,7 @@ func TestListCommand_LongBranchNames(t *testing.T) {
 			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 			oldGetwd := listGetwd
-			listGetwd = func() (string, error) {
+			listGetwd = func(context.Context) (string, error) {
 				return "/tmp", nil
 			}
 			t.Cleanup(func() { listGetwd = oldGetwd })
@@ -445,7 +445,7 @@ func TestListCommand_MixedWorktreeStates(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetwd := listGetwd
-	listGetwd = func() (string, error) {
+	listGetwd = func(context.Context) (string, error) {
 		return "/path/to", nil
 	}
 	t.Cleanup(func() { listGetwd = oldGetwd })
@@ -739,7 +739,7 @@ branch refs/heads/hoge
 			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 			oldGetwd := listGetwd
-			listGetwd = func() (string, error) {
+			listGetwd = func(context.Context) (string, error) {
 				return tt.currentPath, nil
 			}
 			t.Cleanup(func() { listGetwd = oldGetwd })
@@ -802,7 +802,7 @@ branch refs/heads/stripe-basil-migration
 			t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 			oldGetTerminalWidth := getTerminalWidth
-			getTerminalWidth = func() int {
+			getTerminalWidth = func(context.Context) int {
 				return tt.terminalWidth
 			}
 			t.Cleanup(func() { getTerminalWidth = oldGetTerminalWidth })
@@ -857,7 +857,7 @@ branch refs/heads/feature/very-long-branch-name-that-exceeds-max-width
 `
 
 	oldGetTerminalWidth := getTerminalWidth
-	getTerminalWidth = func() int { return 150 }
+	getTerminalWidth = func(context.Context) int { return 150 }
 	t.Cleanup(func() { getTerminalWidth = oldGetTerminalWidth })
 
 	mockExec := &mockListCommandExecutor{
@@ -904,7 +904,7 @@ branch refs/heads/feature/test
 `
 
 	oldGetTerminalWidth := getTerminalWidth
-	getTerminalWidth = func() int { return 200 }
+	getTerminalWidth = func(context.Context) int { return 200 }
 	t.Cleanup(func() { getTerminalWidth = oldGetTerminalWidth })
 
 	mockExec := &mockListCommandExecutor{
@@ -950,7 +950,7 @@ branch refs/heads/feature/test
 `
 
 	oldGetTerminalWidth := getTerminalWidth
-	getTerminalWidth = func() int { return 120 }
+	getTerminalWidth = func(context.Context) int { return 120 }
 	t.Cleanup(func() { getTerminalWidth = oldGetTerminalWidth })
 
 	mockExec := &mockListCommandExecutor{

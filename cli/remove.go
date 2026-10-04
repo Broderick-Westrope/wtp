@@ -22,7 +22,7 @@ import (
 )
 
 // Variable to allow mocking in tests
-var removeGetwd = os.Getwd
+var removeGetwd = getwd
 
 // NewRemoveCommand creates the remove command definition
 func NewRemoveCommand() *cli.Command {
@@ -58,12 +58,9 @@ func NewRemoveCommand() *cli.Command {
 	}
 }
 
-func removeCommand(_ context.Context, cmd *cli.Command) error {
+func removeCommand(ctx context.Context, cmd *cli.Command) error {
 	// Get the writer from cli.Command
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := stdoutFor(ctx, cmd)
 
 	// Extract and validate inputs
 	worktreeName := cmd.Args().Get(0)
@@ -76,7 +73,7 @@ func removeCommand(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Get current working directory
-	cwd, err := removeGetwd()
+	cwd, err := removeGetwd(ctx)
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -303,9 +300,9 @@ func findTargetWorktreeFromList(worktrees []git.Worktree, worktreeName string) (
 }
 
 // getWorktreesForRemove gets worktrees for remove command and writes them to writer (testable)
-func getWorktreesForRemove(w io.Writer) error {
+func getWorktreesForRemove(ctx context.Context, w io.Writer) error {
 	// Get current directory
-	cwd, err := removeGetwd() // Use mockable function for tests
+	cwd, err := removeGetwd(ctx) // Use mockable function for tests
 	if err != nil {
 		return err
 	}
@@ -336,17 +333,17 @@ func getWorktreesForRemove(w io.Writer) error {
 }
 
 // completeWorktrees provides worktree name completion for urfave/cli (wrapper for getWorktreesForRemove)
-func completeWorktrees(_ context.Context, cmd *cli.Command) {
+func completeWorktrees(ctx context.Context, cmd *cli.Command) {
 	current, previous := completionArgsFromCommand(cmd)
 
-	if maybeCompleteFlagSuggestions(cmd, current, previous) {
+	if maybeCompleteFlagSuggestions(ctx, cmd, current, previous) {
 		return
 	}
 
 	currentNormalized := strings.TrimSuffix(current, "*")
 
 	var buf bytes.Buffer
-	if err := getWorktreesForRemove(&buf); err != nil {
+	if err := getWorktreesForRemove(ctx, &buf); err != nil {
 		return
 	}
 

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -41,7 +40,7 @@ func NewCdCommand() *cli.Command {
 	}
 }
 
-func cdToWorktree(_ context.Context, cmd *cli.Command) error {
+func cdToWorktree(ctx context.Context, cmd *cli.Command) error {
 	args := cmd.Args()
 
 	// Empty string signals "no argument provided" to the core function.
@@ -52,7 +51,7 @@ func cdToWorktree(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Get current directory
-	cwd, err := os.Getwd()
+	cwd, err := getwd(ctx)
 	if err != nil {
 		return wtperrors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -64,10 +63,7 @@ func cdToWorktree(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Get the writer from cli.Command
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := stdoutFor(ctx, cmd)
 
 	// Use CommandExecutor-based implementation
 	executor := command.NewRealExecutor()
@@ -137,9 +133,9 @@ func cdCommandWithCommandExecutor(
 }
 
 // getWorktreesForCd gets worktrees for cd command with current position markers and writes them to writer (testable)
-func getWorktreesForCd(w io.Writer) error {
+func getWorktreesForCd(ctx context.Context, w io.Writer) error {
 	// Get current directory
-	cwd, err := os.Getwd()
+	cwd, err := getwd(ctx)
 	if err != nil {
 		return err
 	}
@@ -206,10 +202,10 @@ func writeWorktreesForCd(w io.Writer, worktrees []git.Worktree, cwd string) erro
 }
 
 // completeWorktreesForCd provides worktree name completion for cd command (wrapper for getWorktreesForCd)
-func completeWorktreesForCd(_ context.Context, cmd *cli.Command) {
+func completeWorktreesForCd(ctx context.Context, cmd *cli.Command) {
 	current, previous := completionArgsFromCommand(cmd)
 
-	if maybeCompleteFlagSuggestions(cmd, current, previous) {
+	if maybeCompleteFlagSuggestions(ctx, cmd, current, previous) {
 		return
 	}
 
@@ -220,7 +216,7 @@ func completeWorktreesForCd(_ context.Context, cmd *cli.Command) {
 	}
 
 	var buf bytes.Buffer
-	if err := getWorktreesForCd(&buf); err != nil {
+	if err := getWorktreesForCd(ctx, &buf); err != nil {
 		return
 	}
 

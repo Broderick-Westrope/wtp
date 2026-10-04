@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -11,20 +12,20 @@ import (
 
 func TestAppShellCommandsSkipMaintenance(t *testing.T) {
 	originalGetwd := maintGetwd
-	originalRunCompletion := runCompletionCommand
+	originalExecCompletion := execCompletion
 	t.Cleanup(func() {
 		maintGetwd = originalGetwd
-		runCompletionCommand = originalRunCompletion
+		execCompletion = originalExecCompletion
 	})
 
 	dir := t.TempDir()
 	maintenanceCalls := 0
-	maintGetwd = func() (string, error) {
+	maintGetwd = func(context.Context) (string, error) {
 		maintenanceCalls++
 		return dir, nil
 	}
-	runCompletionCommand = func(shell string) ([]byte, error) {
-		return []byte("completion-" + shell), nil
+	execCompletion = func(_ context.Context, argv []string) ([]byte, error) {
+		return []byte("completion-" + argv[len(argv)-1]), nil
 	}
 
 	for _, command := range []string{"shell-init", "hook", "completion"} {

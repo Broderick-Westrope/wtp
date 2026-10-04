@@ -20,7 +20,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
 
-var archiveGetwd = os.Getwd
+var archiveGetwd = getwd
 
 // gitQuerier abstracts the git.Repository methods needed by archive/unarchive
 // so that unit tests can provide mock implementations.
@@ -53,11 +53,8 @@ func NewArchiveCommand() *cli.Command {
 	}
 }
 
-func archiveCommand(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func archiveCommand(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 
 	branch := cmd.Args().Get(0)
 	if branch == "" {
@@ -66,7 +63,7 @@ func archiveCommand(_ context.Context, cmd *cli.Command) error {
 
 	force := cmd.Bool("force")
 
-	cwd, err := archiveGetwd()
+	cwd, err := archiveGetwd(ctx)
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -268,18 +265,15 @@ func NewUnarchiveCommand() *cli.Command {
 	}
 }
 
-func unarchiveCommand(_ context.Context, cmd *cli.Command) error {
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+func unarchiveCommand(ctx context.Context, cmd *cli.Command) error {
+	w := stdoutFor(ctx, cmd)
 
 	branch := cmd.Args().Get(0)
 	if branch == "" {
 		return fmt.Errorf("branch name is required\n\nUsage: wtp unarchive <branch>")
 	}
 
-	cwd, err := archiveGetwd()
+	cwd, err := archiveGetwd(ctx)
 	if err != nil {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -459,8 +453,8 @@ func resolveUnarchivePath(
 }
 
 // completeNonArchivedBranches provides tab completion for the archive command.
-func completeNonArchivedBranches(_ context.Context, _ *cli.Command) {
-	cwd, err := archiveGetwd()
+func completeNonArchivedBranches(ctx context.Context, _ *cli.Command) {
+	cwd, err := archiveGetwd(ctx)
 	if err != nil {
 		return
 	}
@@ -501,8 +495,8 @@ func completeNonArchivedBranches(_ context.Context, _ *cli.Command) {
 
 // completeArchivedBranches provides tab completion for the unarchive command
 // by reading archived entries from state.json.
-func completeArchivedBranches(_ context.Context, _ *cli.Command) {
-	cwd, err := archiveGetwd()
+func completeArchivedBranches(ctx context.Context, _ *cli.Command) {
+	cwd, err := archiveGetwd(ctx)
 	if err != nil {
 		return
 	}

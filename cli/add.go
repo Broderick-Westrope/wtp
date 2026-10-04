@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -21,6 +20,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/hooks"
 	wtpio "github.com/Broderick-Westrope/wtp/v3/internal/io"
 	"github.com/Broderick-Westrope/wtp/v3/internal/marker"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
@@ -58,12 +58,9 @@ func NewAddCommand() *cli.Command {
 	}
 }
 
-func addCommand(_ context.Context, cmd *cli.Command) error {
+func addCommand(ctx context.Context, cmd *cli.Command) error {
 	// Get the writer from cli.Command
-	w := cmd.Root().Writer
-	if w == nil {
-		w = os.Stdout
-	}
+	w := stdoutFor(ctx, cmd)
 	// Wrap in FlushingWriter to ensure real-time output for all operations
 	fw := wtpio.NewFlushingWriter(w)
 	// Validate inputs
@@ -72,7 +69,7 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Setup repository and configuration
-	repo, cfg, mainRepoPath, err := setupRepoAndConfig()
+	repo, cfg, mainRepoPath, err := setupRepoAndConfig(ctx)
 	if err != nil {
 		return err
 	}
@@ -80,7 +77,7 @@ func addCommand(_ context.Context, cmd *cli.Command) error {
 	// Create command executor
 	executor := command.NewRealExecutor()
 
-	return addCommandWithCommandExecutor(cmd, fw, os.Stderr, executor, cfg, mainRepoPath, repo.GetRemoteURL)
+	return addCommandWithCommandExecutor(cmd, fw, stderrFor(ctx), executor, cfg, mainRepoPath, repo.GetRemoteURL)
 }
 
 // addCommandWithCommandExecutor is the implementation using CommandExecutor.
@@ -447,8 +444,8 @@ func validateAddInput(cmd *cli.Command) error {
 	return nil
 }
 
-func setupRepoAndConfig() (*git.Repository, *config.Config, string, error) {
-	cwd, err := os.Getwd()
+func setupRepoAndConfig(ctx context.Context) (*git.Repository, *config.Config, string, error) {
+	cwd, err := getwd(ctx)
 	if err != nil {
 		return nil, nil, "", errors.DirectoryAccessFailed("access current", ".", err)
 	}
@@ -465,7 +462,7 @@ func setupRepoAndConfig() (*git.Repository, *config.Config, string, error) {
 
 	// Ensure global config exists on first run (non-fatal).
 	if _, ensureErr := config.EnsureGlobalConfig(); ensureErr != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: failed to create global config: %v\n", ensureErr)
+		_, _ = fmt.Fprintf(stderrFor(ctx), "warning: failed to create global config: %v\n", ensureErr)
 	}
 
 	cfg, err := config.LoadConfig(mainRepoPath)
@@ -478,16 +475,17 @@ func setupRepoAndConfig() (*git.Repository, *config.Config, string, error) {
 }
 
 // getBranches gets available branch names and writes them to the writer (testable)
-func getBranches(w io.Writer) error {
+func getBranches(ctx context.Context, w io.Writer) error {
 	// Get current directory
-	cwd, err := os.Getwd()
+	cwd, err := getwd(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Get all branches using git for-each-ref for better control
-	gitCmd := exec.Command("git", "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes")
+	gitCmd := exec.CommandContext(ctx, "git", "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes")
 	gitCmd.Dir = cwd
+	gitCmd.Env = procenv.From(ctx).Environ
 	output, err := gitCmd.Output()
 	if err != nil {
 		return err
@@ -530,14 +528,14 @@ func getBranches(w io.Writer) error {
 }
 
 // completeBranches provides branch name completion for urfave/cli (wrapper for getBranches)
-func completeBranches(_ context.Context, cmd *cli.Command) {
+func completeBranches(ctx context.Context, cmd *cli.Command) {
 	current, previous := completionArgsFromCommand(cmd)
-	if maybeCompleteFlagSuggestions(cmd, current, previous) {
+	if maybeCompleteFlagSuggestions(ctx, cmd, current, previous) {
 		return
 	}
 
 	var buf bytes.Buffer
-	if err := getBranches(&buf); err != nil {
+	if err := getBranches(ctx, &buf); err != nil {
 		return
 	}
 

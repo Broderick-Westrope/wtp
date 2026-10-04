@@ -205,7 +205,7 @@ func (e *MockGitError) Error() string {
 
 func TestSetupRepoAndConfig(t *testing.T) {
 	t.Run("should setup repository and config from current directory", func(t *testing.T) {
-		repo, cfg, mainRepoPath, err := setupRepoAndConfig()
+		repo, cfg, mainRepoPath, err := setupRepoAndConfig(t.Context())
 
 		if err != nil {
 			t.Skip("Not in a git repository - skipping test")

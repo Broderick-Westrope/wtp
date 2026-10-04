@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +13,7 @@ func TestRunMaintenance_SilentlySkipsNonGitDir(t *testing.T) {
 	dir := t.TempDir()
 
 	origGetwd := maintGetwd
-	maintGetwd = func() (string, error) { return dir, nil }
+	maintGetwd = func(context.Context) (string, error) { return dir, nil }
 	t.Cleanup(func() { maintGetwd = origGetwd })
 
 	origNewGitRepo := maintNewGitRepo
@@ -29,7 +30,7 @@ func TestRunMaintenance_SilentlySkipsNoRemote(t *testing.T) {
 	dir := t.TempDir()
 
 	origGetwd := maintGetwd
-	maintGetwd = func() (string, error) { return dir, nil }
+	maintGetwd = func(context.Context) (string, error) { return dir, nil }
 	t.Cleanup(func() { maintGetwd = origGetwd })
 
 	origNewGitRepo := maintNewGitRepo
