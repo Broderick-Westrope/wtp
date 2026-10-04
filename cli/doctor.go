@@ -15,6 +15,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 	"github.com/Broderick-Westrope/wtp/v3/internal/github"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
@@ -41,13 +42,13 @@ func doctorCommand(ctx context.Context, cmd *cli.Command) error {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return errors.NotInGitRepository()
 	}
 
 	// Get all registered worktrees
-	executor := command.NewRealExecutor()
+	executor := command.NewRealExecutor(procenv.From(ctx))
 	result, err := executor.Execute([]command.Command{command.GitWorktreeList()})
 	if err != nil {
 		return errors.GitCommandFailed("git worktree list", err.Error())
@@ -87,7 +88,7 @@ func doctorCommand(ctx context.Context, cmd *cli.Command) error {
 	issueCount += checkOrphanedCentralizedDirs(w, registeredPaths)
 
 	// 4. gh CLI status
-	issueCount += checkGHStatus(w)
+	issueCount += checkGHStatus(ctx, w, cwd)
 
 	// Summary
 	if issueCount == 0 {
@@ -241,7 +242,7 @@ func walkCentralizedDirs(
 
 // checkGHStatus checks gh CLI availability and authentication.
 // Returns number of issues found.
-func checkGHStatus(w io.Writer) int {
+func checkGHStatus(ctx context.Context, w io.Writer, dir string) int {
 	count := 0
 	if !doctorIsGHAvailable() {
 		_, _ = fmt.Fprintln(w, "✗ gh CLI not found")
@@ -252,7 +253,7 @@ func checkGHStatus(w io.Writer) int {
 
 	_, _ = fmt.Fprintln(w, "✓ gh CLI found")
 
-	auth, err := github.IsAuthenticated()
+	auth, err := github.IsAuthenticated(ctx, dir)
 	if err != nil {
 		_, _ = fmt.Fprintf(w, "⚠ gh authentication check failed: %v\n", err)
 		count++

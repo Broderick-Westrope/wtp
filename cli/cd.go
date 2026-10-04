@@ -15,6 +15,7 @@ import (
 	wtperrors "github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/fzf"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 // NewCdCommand creates the cd command definition
@@ -57,7 +58,7 @@ func cdToWorktree(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Initialize repository to check if we're in a git repo
-	_, err = git.NewRepository(cwd)
+	_, err = newRepository(ctx, cwd)
 	if err != nil {
 		return wtperrors.NotInGitRepository()
 	}
@@ -66,8 +67,8 @@ func cdToWorktree(ctx context.Context, cmd *cli.Command) error {
 	w := stdoutFor(ctx, cmd)
 
 	// Use CommandExecutor-based implementation
-	executor := command.NewRealExecutor()
-	finder := fzf.NewFinder()
+	executor := command.NewRealExecutor(procenv.From(ctx))
+	finder := fzf.NewFinder(procenv.From(ctx))
 	return cdCommandWithCommandExecutor(w, executor, worktreeName, finder)
 }
 
@@ -141,7 +142,7 @@ func getWorktreesForCd(ctx context.Context, w io.Writer) error {
 	}
 
 	// Initialize repository
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return err
 	}

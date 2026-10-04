@@ -75,14 +75,15 @@ func addCommand(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Create command executor
-	executor := command.NewRealExecutor()
+	executor := command.NewRealExecutor(procenv.From(ctx))
 
-	return addCommandWithCommandExecutor(cmd, fw, stderrFor(ctx), executor, cfg, mainRepoPath, repo.GetRemoteURL)
+	return addCommandWithCommandExecutor(ctx, cmd, fw, stderrFor(ctx), executor, cfg, mainRepoPath, repo.GetRemoteURL)
 }
 
 // addCommandWithCommandExecutor is the implementation using CommandExecutor.
 // getRemoteURL is called with "origin" to obtain the remote URL for XDG path resolution.
 func addCommandWithCommandExecutor(
+	ctx context.Context,
 	cmd *cli.Command,
 	w io.Writer,
 	errW io.Writer,
@@ -103,7 +104,7 @@ func addCommandWithCommandExecutor(
 	}
 
 	// Resolve branch if needed
-	resolvedTrack, err := resolveBranchTracking(cmd, branchName, mainRepoPath)
+	resolvedTrack, err := resolveBranchTracking(ctx, cmd, branchName, mainRepoPath)
 	if err != nil {
 		return err
 	}
@@ -131,7 +132,7 @@ func addCommandWithCommandExecutor(
 		return analyzeGitWorktreeError(workTreePath, branchName, gitError, gitOutput)
 	}
 
-	if err := executePostCreateHooks(w, cfg, mainRepoPath, workTreePath); err != nil {
+	if err := executePostCreateHooks(w, procenv.From(ctx).Environ, cfg, mainRepoPath, workTreePath); err != nil {
 		if _, warnErr := fmt.Fprintf(w, "Warning: Hook execution failed: %v\n", err); warnErr != nil {
 			return warnErr
 		}
@@ -143,7 +144,7 @@ func addCommandWithCommandExecutor(
 	// so the user should land there even if --exec failed (to debug it).
 	stay := cmd.Bool("stay")
 	if !stay {
-		if err := marker.Emit(errW, workTreePath); err != nil {
+		if err := marker.Emit(errW, procenv.From(ctx).Environ, workTreePath); err != nil {
 			return err
 		}
 	}
@@ -371,13 +372,15 @@ Use the --track flag to specify which remote to use:
 Original error: %v`, e.BranchName, e.BranchName, e.BranchName, e.BranchName, e.BranchName, e.GitError)
 }
 
-func executePostCreateHooks(w io.Writer, cfg *config.Config, repoPath, workTreePath string) error {
+func executePostCreateHooks(
+	w io.Writer, environ []string, cfg *config.Config, repoPath, workTreePath string,
+) error {
 	if cfg.HasHooks() {
 		if _, err := fmt.Fprintln(w, "\nExecuting post-create hooks..."); err != nil {
 			return err
 		}
 
-		executor := hooks.NewExecutor(cfg, repoPath)
+		executor := hooks.NewExecutor(cfg, repoPath, environ)
 		if err := executor.ExecutePostCreateHooks(w, workTreePath); err != nil {
 			return err
 		}
@@ -450,7 +453,7 @@ func setupRepoAndConfig(ctx context.Context) (*git.Repository, *config.Config, s
 		return nil, nil, "", errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return nil, nil, "", errors.NotInGitRepository()
 	}
@@ -659,14 +662,14 @@ func resolveWorktreePath(
 
 // resolveBranchTracking handles branch resolution and tracking setup
 func resolveBranchTracking(
-	cmd *cli.Command, branchName string, mainRepoPath string,
+	ctx context.Context, cmd *cli.Command, branchName string, mainRepoPath string,
 ) (string, error) {
 	// Only auto-resolve branch when not creating a new branch and branch name exists
 	if cmd.String("branch") != "" || branchName == "" {
 		return "", nil
 	}
 
-	repo, err := git.NewRepository(mainRepoPath)
+	repo, err := newRepository(ctx, mainRepoPath)
 	if err != nil {
 		return "", err
 	}

@@ -81,7 +81,7 @@ func TestNewRepository(t *testing.T) {
 	// Test with valid git repository
 	repoDir := setupTestRepo(t)
 
-	repo, err := NewRepository(repoDir)
+	repo, err := NewRepository(repoDir, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -92,9 +92,18 @@ func TestNewRepository(t *testing.T) {
 
 	// Test with non-git directory
 	tempDir := t.TempDir()
-	_, err = NewRepository(tempDir)
+	_, err = NewRepository(tempDir, nil)
 	if err == nil {
 		t.Error("Expected error for non-git directory, got nil")
+	}
+}
+
+func TestNewRepositoryUsesProvidedEnviron(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	environ := append(os.Environ(), "GIT_DIR="+filepath.Join(t.TempDir(), "missing"))
+
+	if _, err := NewRepository(repoDir, environ); err == nil {
+		t.Error("Expected git to honor GIT_DIR from the provided environ")
 	}
 }
 
@@ -249,7 +258,7 @@ detached
 
 func TestExecuteGitCommand(t *testing.T) {
 	repoDir := setupTestRepo(t)
-	repo, err := NewRepository(repoDir)
+	repo, err := NewRepository(repoDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
@@ -320,18 +329,18 @@ func TestRepository_GetRepositoryName(t *testing.T) {
 func TestIsGitRepository(t *testing.T) {
 	// Test with valid git repository
 	repoDir := setupTestRepo(t)
-	if !isGitRepository(repoDir) {
+	if !isGitRepository(repoDir, nil) {
 		t.Error("Expected true for git repository")
 	}
 
 	// Test with non-git directory
 	tempDir := t.TempDir()
-	if isGitRepository(tempDir) {
+	if isGitRepository(tempDir, nil) {
 		t.Error("Expected false for non-git directory")
 	}
 
 	// Test with non-existent directory
-	if isGitRepository("/path/that/does/not/exist") {
+	if isGitRepository("/path/that/does/not/exist", nil) {
 		t.Error("Expected false for non-existent directory")
 	}
 }
@@ -375,7 +384,7 @@ func TestBranchResolution(t *testing.T) {
 	}
 
 	// Create repository instance
-	repo, err := NewRepository(repoDir)
+	repo, err := NewRepository(repoDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
@@ -477,7 +486,7 @@ func TestGetRemoteURL(t *testing.T) {
 		runGit("remote", "add", "origin", originURL)
 		defer runGit("remote", "remove", "origin")
 
-		repo, err := NewRepository(repoDir)
+		repo, err := NewRepository(repoDir, nil)
 		if err != nil {
 			t.Fatalf("NewRepository: %v", err)
 		}
@@ -492,7 +501,7 @@ func TestGetRemoteURL(t *testing.T) {
 	})
 
 	t.Run("returns error for missing remote", func(t *testing.T) {
-		repo, err := NewRepository(repoDir)
+		repo, err := NewRepository(repoDir, nil)
 		if err != nil {
 			t.Fatalf("NewRepository: %v", err)
 		}
@@ -506,7 +515,7 @@ func TestGetRemoteURL(t *testing.T) {
 
 func TestCommitExists(t *testing.T) {
 	repoDir := setupTestRepo(t)
-	repo, err := NewRepository(repoDir)
+	repo, err := NewRepository(repoDir, nil)
 	if err != nil {
 		t.Fatalf("NewRepository: %v", err)
 	}
@@ -550,7 +559,7 @@ func TestCommitExists(t *testing.T) {
 
 func TestIsWorktreeDirty(t *testing.T) {
 	repoDir := setupTestRepo(t)
-	repo, err := NewRepository(repoDir)
+	repo, err := NewRepository(repoDir, nil)
 	if err != nil {
 		t.Fatalf("NewRepository: %v", err)
 	}
@@ -639,7 +648,7 @@ func setupCloneWithUpstream(t *testing.T) (cloneDir, branch string) {
 func TestHasUnpushedCommits(t *testing.T) {
 	t.Run("no upstream returns false", func(t *testing.T) {
 		repoDir := setupTestRepo(t)
-		repo, err := NewRepository(repoDir)
+		repo, err := NewRepository(repoDir, nil)
 		if err != nil {
 			t.Fatalf("NewRepository: %v", err)
 		}
@@ -656,7 +665,7 @@ func TestHasUnpushedCommits(t *testing.T) {
 	t.Run("with upstream and no unpushed", func(t *testing.T) {
 		cloneDir, branch := setupCloneWithUpstream(t)
 
-		repo, err := NewRepository(cloneDir)
+		repo, err := NewRepository(cloneDir, nil)
 		if err != nil {
 			t.Fatalf("NewRepository: %v", err)
 		}
@@ -688,7 +697,7 @@ func TestHasUnpushedCommits(t *testing.T) {
 			t.Fatalf("git commit: %v\n%s", err, output)
 		}
 
-		repo, err := NewRepository(cloneDir)
+		repo, err := NewRepository(cloneDir, nil)
 		if err != nil {
 			t.Fatalf("NewRepository: %v", err)
 		}

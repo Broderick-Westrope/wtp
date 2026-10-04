@@ -50,9 +50,9 @@ type worktreePRCI struct {
 // Variables to allow mocking in tests
 var (
 	listGetwd        = getwd
-	listNewGitRepo   = git.NewRepository
-	listGetRemoteURL = func(mainRepoPath string) (string, error) {
-		repo, err := git.NewRepository(mainRepoPath)
+	listNewGitRepo   = newRepository
+	listGetRemoteURL = func(ctx context.Context, mainRepoPath string) (string, error) {
+		repo, err := newRepository(ctx, mainRepoPath)
 		if err != nil {
 			return "", err
 		}
@@ -118,7 +118,7 @@ func listCommand(ctx context.Context, cmd *cli.Command) error {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	repo, err := listNewGitRepo(cwd)
+	repo, err := listNewGitRepo(ctx, cwd)
 	if err != nil {
 		return errors.NotInGitRepository()
 	}
@@ -135,7 +135,7 @@ func listCommand(ctx context.Context, cmd *cli.Command) error {
 	opts.ShowAll = cmd.Bool("all")
 	opts.NoSync = cmd.Bool("no-sync")
 
-	executor := listNewExecutor()
+	executor := listNewExecutor(procenv.From(ctx))
 	return listCommandWithCommandExecutor(ctx, cmd, w, executor, mainRepoPath, opts)
 }
 
@@ -167,7 +167,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 
 	// Try to get remote URL for state/cache key derivation
 	var repoID *remote.RepoIdentifier
-	if remoteURL, rerr := listGetRemoteURL(mainRepoPath); rerr == nil {
+	if remoteURL, rerr := listGetRemoteURL(ctx, mainRepoPath); rerr == nil {
 		if id, perr := remote.Parse(remoteURL); perr == nil {
 			repoID = &id
 		}
@@ -213,7 +213,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	ghAvailable := listIsGHAvailable()
 
 	if ghAvailable && !opts.NoSync && !opts.Quiet && repoID != nil {
-		if err := fetchPRCIData(ctx, displayWorktrees, repoID, archivedBranches, prciData); err != nil {
+		if err := fetchPRCIData(ctx, mainRepoPath, displayWorktrees, repoID, archivedBranches, prciData); err != nil {
 			return err
 		}
 	} else if !ghAvailable && !opts.Quiet {
@@ -260,6 +260,7 @@ type prciSharedState struct {
 // Network calls are made outside the lock; only map writes are protected by mu.
 func fetchPRCIForBranch(
 	ctx context.Context,
+	mainRepoPath string,
 	wt git.Worktree,
 	key string,
 	cacheStore *cache.Store,
@@ -277,11 +278,11 @@ func fetchPRCIForBranch(
 	// Fetch fresh data — network calls outside the lock.
 	// CI checks require a PR, so skip the CI call when there's no PR to avoid
 	// a wasted round-trip that always returns "no pull requests found".
-	pr, prErr := listGetPRForBranch(ctx, wt.Branch)
+	pr, prErr := listGetPRForBranch(ctx, mainRepoPath, wt.Branch)
 	var ci *github.CIStatus
 	var ciErr error
 	if pr != nil {
-		ci, ciErr = listGetCIStatus(ctx, wt.Branch)
+		ci, ciErr = listGetCIStatus(ctx, mainRepoPath, wt.Branch)
 	}
 	if prErr != nil || ciErr != nil {
 		shared.errorCount.Add(1)
@@ -332,6 +333,7 @@ func updateSharedWithFreshData(
 // Auto-archive is handled by the maintenance system, not list.
 func fetchPRCIData(
 	ctx context.Context,
+	mainRepoPath string,
 	worktrees []git.Worktree,
 	repoID *remote.RepoIdentifier,
 	archivedBranches map[string]bool,
@@ -355,7 +357,7 @@ func fetchPRCIData(
 
 		key := repoID.StateKey(wt.Branch)
 		g.Go(func() error {
-			return fetchPRCIForBranch(gCtx, wt, key, cacheStore, ttl, shared)
+			return fetchPRCIForBranch(gCtx, mainRepoPath, wt, key, cacheStore, ttl, shared)
 		})
 	}
 

@@ -19,7 +19,7 @@ func TestGetMainWorktreePath(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create repository instance
-	repo, err := NewRepository(tempDir)
+	repo, err := NewRepository(tempDir, nil)
 	assert.NoError(t, err)
 
 	// Test GetMainWorktreePath
@@ -42,7 +42,7 @@ func TestGetWorktrees_NoWorktrees(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Create repository instance
-	repo, err := NewRepository(tempDir)
+	repo, err := NewRepository(tempDir, nil)
 	assert.NoError(t, err)
 
 	// Test GetWorktrees - should return main worktree only
@@ -79,7 +79,7 @@ func TestGetWorktrees_WithWorktrees(t *testing.T) {
 	runCmd(t, tempDir, "git", "worktree", "add", worktree1Path, "feature/test")
 
 	// Create repository instance
-	repo, err := NewRepository(tempDir)
+	repo, err := NewRepository(tempDir, nil)
 	assert.NoError(t, err)
 
 	// Test GetWorktrees - should return main + worktree

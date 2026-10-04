@@ -111,7 +111,7 @@ func setupTestRepoWithBranches(t *testing.T) (repoDir, mergedBranch, unmergedBra
 func TestBranchDeletion(t *testing.T) {
 	repoDir, mergedBranch, unmergedBranch := setupTestRepoWithBranches(t)
 
-	repo, err := NewRepository(repoDir)
+	repo, err := NewRepository(repoDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestBranchDeletion(t *testing.T) {
 func TestWorktreeWithBranchRemoval(t *testing.T) {
 	repoDir, _, unmergedBranch := setupTestRepoWithBranches(t)
 
-	repo, err := NewRepository(repoDir)
+	repo, err := NewRepository(repoDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to create repository: %v", err)
 	}

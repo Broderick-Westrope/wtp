@@ -245,7 +245,7 @@ func TestRemoveCommand_CommandConstruction(t *testing.T) {
 			forceFlag := tt.flags["force"] == true
 			keepFlag := tt.flags["keep"] == true
 			err := removeCommandWithCommandExecutor(
-				cmd, &buf, mockExec, "/test/repo", tt.worktreeName, forceFlag, keepFlag, false,
+				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.worktreeName, forceFlag, keepFlag, false,
 			)
 
 			assert.NoError(t, err)
@@ -312,7 +312,9 @@ func TestRemoveCommand_SuccessMessage(t *testing.T) {
 			var buf bytes.Buffer
 
 			keepFlag := tt.keepFlag
-			err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/test/repo", tt.worktreeName, false, keepFlag, false)
+			err := removeCommandWithCommandExecutor(
+				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.worktreeName, false, keepFlag, false,
+			)
 
 			assert.NoError(t, err)
 			output := buf.String()
@@ -389,7 +391,9 @@ func TestRemoveCommand_WorktreeNotFound(t *testing.T) {
 	cmd := createRemoveTestCLICommand(map[string]any{}, []string{"nonexistent"})
 	var buf bytes.Buffer
 
-	err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/test/repo", "nonexistent", false, false, false)
+	err := removeCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, mockExec, "/test/repo", "nonexistent", false, false, false,
+	)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "worktree 'nonexistent' not found")
@@ -409,7 +413,9 @@ func TestRemoveCommand_WorktreeNotFound_ShowsConsistentNames(t *testing.T) {
 	cmd := createRemoveTestCLICommand(map[string]any{}, []string{"nonexistent"})
 	var buf bytes.Buffer
 
-	err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/repo", "nonexistent", false, false, false)
+	err := removeCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, mockExec, "/repo", "nonexistent", false, false, false,
+	)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "worktree 'nonexistent' not found")
@@ -453,7 +459,9 @@ func TestRemoveCommand_FailsWhenRemovingCurrentWorktree(t *testing.T) {
 			cmd := createRemoveTestCLICommand(map[string]any{}, []string{"feature/foo"})
 			var buf bytes.Buffer
 
-			err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, tt.cwd, "feature/foo", false, false, false)
+			err := removeCommandWithCommandExecutor(
+				t.Context(), cmd, &buf, mockExec, tt.cwd, "feature/foo", false, false, false,
+			)
 
 			assert.Error(t, err)
 			assert.Contains(t, err.Error(), "cannot remove worktree 'feature/foo'")
@@ -483,7 +491,9 @@ func TestRemoveCommand_ExecutionError(t *testing.T) {
 	cmd := createRemoveTestCLICommand(map[string]any{}, []string{"feature-branch"})
 	var buf bytes.Buffer
 
-	err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/test/repo", "feature-branch", false, false, false)
+	err := removeCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, mockExec, "/test/repo", "feature-branch", false, false, false,
+	)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to remove worktree")
@@ -557,7 +567,7 @@ func TestRemoveCommand_DirtyWorktree(t *testing.T) {
 			var buf bytes.Buffer
 
 			err := removeCommandWithCommandExecutor(
-				cmd, &buf, mockExec, "/test/repo", "dirty-feature", tt.forceFlag, false, false)
+				t.Context(), cmd, &buf, mockExec, "/test/repo", "dirty-feature", tt.forceFlag, false, false)
 
 			if tt.shouldSucceed {
 				assert.NoError(t, err)
@@ -651,7 +661,7 @@ func TestRemoveCommand_BranchRemovalWithUnmergedCommits(t *testing.T) {
 			var buf bytes.Buffer
 
 			err := removeCommandWithCommandExecutor(
-				cmd, &buf, mockExec, "/test/repo", "feature-unmerged", false, false, tt.forceBranchFlag)
+				t.Context(), cmd, &buf, mockExec, "/test/repo", "feature-unmerged", false, false, tt.forceBranchFlag)
 
 			if tt.shouldSucceed {
 				assert.NoError(t, err)
@@ -718,7 +728,9 @@ func TestRemoveCommand_InternationalCharacters(t *testing.T) {
 			cmd := createRemoveTestCLICommand(map[string]any{}, []string{tt.branchName})
 			var buf bytes.Buffer
 
-			err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/test/repo", tt.branchName, false, false, false)
+			err := removeCommandWithCommandExecutor(
+				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.branchName, false, false, false,
+			)
 
 			assert.NoError(t, err)
 			assert.Contains(t, buf.String(), "Removed worktree")
@@ -749,7 +761,9 @@ func TestRemoveCommand_PathWithSpaces(t *testing.T) {
 	cmd := createRemoveTestCLICommand(map[string]any{}, []string{branchName})
 	var buf bytes.Buffer
 
-	err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/path/to/main", branchName, false, false, false)
+	err := removeCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, mockExec, "/path/to/main", branchName, false, false, false,
+	)
 
 	assert.NoError(t, err)
 	// Verify the correct path was passed to git command (3 commands: list + remove + branch -d)
@@ -805,7 +819,9 @@ branch refs/heads/test-feature
 			cmd := createRemoveTestCLICommand(map[string]any{}, []string{tt.input})
 			var buf bytes.Buffer
 
-			err := removeCommandWithCommandExecutor(cmd, &buf, mockExec, "/test/repo", tt.input, false, false, false)
+			err := removeCommandWithCommandExecutor(
+				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.input, false, false, false,
+			)
 
 			assert.NoError(t, err)
 			// Verify the correct worktree was targeted (at least list + remove)

@@ -13,15 +13,28 @@ import (
 
 // Repository represents a git repository and offers helper methods for worktree operations.
 type Repository struct {
-	path string
+	path    string
+	environ []string
 }
 
 // NewRepository constructs a Repository for the given path after validating it is a git repository.
-func NewRepository(path string) (*Repository, error) {
-	if !isGitRepository(path) {
+// git commands run with environ ("KEY=value" entries); a nil environ inherits the process environment.
+func NewRepository(path string, environ []string) (*Repository, error) {
+	if !isGitRepository(path, environ) {
 		return nil, errors.NotInGitRepository()
 	}
-	return &Repository{path: path}, nil
+	return &Repository{path: path, environ: environ}, nil
+}
+
+func (r *Repository) gitCommand(args ...string) *exec.Cmd {
+	return newGitCommand(r.path, r.environ, args...)
+}
+
+func newGitCommand(dir string, environ []string, args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = environ
+	return cmd
 }
 
 // Path returns the root path for the repository.
@@ -38,8 +51,7 @@ func (r *Repository) GetRepositoryName() string {
 // This is useful when running commands from within a worktree
 func (r *Repository) GetMainWorktreePath() (string, error) {
 	// Get the common directory which points to the main repository's .git
-	cmd := exec.Command("git", "rev-parse", "--git-common-dir")
-	cmd.Dir = r.path
+	cmd := r.gitCommand("rev-parse", "--git-common-dir")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get main repository path: %w", err)
@@ -76,8 +88,7 @@ func (r *Repository) GetMainWorktreePath() (string, error) {
 
 // GetWorktrees lists the worktrees associated with the repository.
 func (r *Repository) GetWorktrees() ([]Worktree, error) {
-	cmd := exec.Command("git", "worktree", "list", "--porcelain")
-	cmd.Dir = r.path
+	cmd := r.gitCommand("worktree", "list", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list worktrees: %w", err)
@@ -101,8 +112,7 @@ func (r *Repository) CreateWorktree(path, branch string) error {
 		args = append(args, branch)
 	}
 
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.path
+	cmd := r.gitCommand(args...)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to create worktree: %w", err)
 	}
@@ -117,8 +127,7 @@ func (r *Repository) RemoveWorktree(path string, force bool) error {
 	}
 	args = append(args, path)
 
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.path
+	cmd := r.gitCommand(args...)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to remove worktree: %w", err)
 	}
@@ -128,8 +137,7 @@ func (r *Repository) RemoveWorktree(path string, force bool) error {
 // GetRemoteURL returns the URL for the given remote name.
 // It runs `git remote get-url <remoteName>` and returns the trimmed output.
 func (r *Repository) GetRemoteURL(remoteName string) (string, error) {
-	cmd := exec.Command("git", "remote", "get-url", remoteName)
-	cmd.Dir = r.path
+	cmd := r.gitCommand("remote", "get-url", remoteName)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get URL for remote %q: %w", remoteName, err)
@@ -139,8 +147,7 @@ func (r *Repository) GetRemoteURL(remoteName string) (string, error) {
 
 // ExecuteGitCommand executes a git command in the repository directory
 func (r *Repository) ExecuteGitCommand(args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.path
+	cmd := r.gitCommand(args...)
 	// Debug: print the command being executed
 	// fmt.Printf("DEBUG: Executing: git %s\n", strings.Join(args, " "))
 	output, err := cmd.CombinedOutput()
@@ -158,8 +165,7 @@ func (r *Repository) BranchExists(branch string) (bool, error) {
 	}
 
 	// #nosec G204 - branch is validated above
-	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", fmt.Sprintf("refs/heads/%s", branch))
-	cmd.Dir = r.path
+	cmd := r.gitCommand("show-ref", "--verify", "--quiet", fmt.Sprintf("refs/heads/%s", branch))
 	err := cmd.Run()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -182,8 +188,7 @@ func (r *Repository) GetRemoteBranches(branch string) (map[string]string, error)
 
 	// Get all remote branches that match the branch name
 	// #nosec G204 - branch is validated above
-	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:short)", fmt.Sprintf("refs/remotes/*/%s", branch))
-	cmd.Dir = r.path
+	cmd := r.gitCommand("for-each-ref", "--format=%(refname:short)", fmt.Sprintf("refs/remotes/*/%s", branch))
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get remote branches: %w", err)
@@ -249,11 +254,10 @@ func (r *Repository) ResolveBranch(branch string) (resolvedBranch string, isRemo
 	return "", false, nil
 }
 
-func isGitRepository(path string) bool {
+func isGitRepository(path string, environ []string) bool {
 	// Use git rev-parse to check if we're in a git repository
 	// This works for both regular repos and worktrees
-	cmd := exec.Command("git", "rev-parse", "--git-dir")
-	cmd.Dir = path
+	cmd := newGitCommand(path, environ, "rev-parse", "--git-dir")
 	if err := cmd.Run(); err != nil {
 		return false
 	}
@@ -268,8 +272,7 @@ func (r *Repository) CommitExists(sha string) (bool, error) {
 	}
 
 	// #nosec G204 - sha is validated above
-	cmd := exec.Command("git", "cat-file", "-t", sha)
-	cmd.Dir = r.path
+	cmd := r.gitCommand("cat-file", "-t", sha)
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -285,9 +288,9 @@ func (r *Repository) CommitExists(sha string) (bool, error) {
 
 // IsWorktreeDirty checks whether the worktree at the given path has staged or
 // unstaged changes (including untracked files).
-func (*Repository) IsWorktreeDirty(worktreePath string) (bool, error) {
+func (r *Repository) IsWorktreeDirty(worktreePath string) (bool, error) {
 	// #nosec G204 - worktreePath comes from trusted callers
-	cmd := exec.Command("git", "-C", worktreePath, "status", "--porcelain")
+	cmd := r.gitCommand("-C", worktreePath, "status", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
 		return false, fmt.Errorf("failed to check worktree status: %w", err)
@@ -305,8 +308,7 @@ func (r *Repository) HasUnpushedCommits(branch string) (bool, error) {
 
 	revRange := fmt.Sprintf("%s@{u}..%s", branch, branch)
 	// #nosec G204 - branch is validated above
-	cmd := exec.Command("git", "log", revRange, "--oneline")
-	cmd.Dir = r.path
+	cmd := r.gitCommand("log", revRange, "--oneline")
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

@@ -113,7 +113,7 @@ func TestDoctor_CheckGHStatus_Available(t *testing.T) {
 	t.Cleanup(func() { doctorIsGHAvailable = old })
 
 	var buf bytes.Buffer
-	count := checkGHStatus(&buf)
+	count := checkGHStatus(t.Context(), &buf, t.TempDir())
 
 	output := buf.String()
 	assert.Contains(t, output, "gh CLI found")
@@ -127,7 +127,7 @@ func TestDoctor_CheckGHStatus_NotAvailable(t *testing.T) {
 	t.Cleanup(func() { doctorIsGHAvailable = old })
 
 	var buf bytes.Buffer
-	count := checkGHStatus(&buf)
+	count := checkGHStatus(t.Context(), &buf, t.TempDir())
 	output := buf.String()
 	assert.Contains(t, output, "✗ gh CLI not found")
 	assert.Greater(t, count, 0)

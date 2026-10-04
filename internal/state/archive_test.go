@@ -1,6 +1,8 @@
 package state_test
 
 import (
+	"bytes"
+	"io"
 	"testing"
 	"time"
 
@@ -63,7 +65,7 @@ func TestPerformArchive_Success(t *testing.T) {
 		WorktreePath: "/tmp/wt/feature-foo",
 	}
 
-	_, err := state.PerformArchive(executor, store, "owner/repo::feature/foo", &ws)
+	_, err := state.PerformArchive(executor, store, "owner/repo::feature/foo", &ws, io.Discard)
 	require.NoError(t, err)
 
 	// Verify state was written
@@ -90,7 +92,7 @@ func TestPerformArchive_SkipsWhenFieldsEmpty(t *testing.T) {
 		// No WorktreePath or Branch — should skip both remove and delete
 	}
 
-	_, err := state.PerformArchive(executor, store, "owner/repo::empty", &ws)
+	_, err := state.PerformArchive(executor, store, "owner/repo::empty", &ws, io.Discard)
 	require.NoError(t, err)
 
 	// No executor calls should be made
@@ -117,7 +119,7 @@ func TestPerformArchive_WorktreeAlreadyGone(t *testing.T) {
 		WorktreePath: "/tmp/wt/gone",
 	}
 
-	_, err := state.PerformArchive(executor, store, "owner/repo::feature/bar", &ws)
+	_, err := state.PerformArchive(executor, store, "owner/repo::feature/bar", &ws, io.Discard)
 	require.NoError(t, err, "should succeed even when worktree is already gone")
 }
 
@@ -140,6 +142,33 @@ func TestPerformArchive_BranchAlreadyGone(t *testing.T) {
 		WorktreePath: "/tmp/wt/feature-gone",
 	}
 
-	_, err := state.PerformArchive(executor, store, "owner/repo::feature/gone", &ws)
+	_, err := state.PerformArchive(executor, store, "owner/repo::feature/gone", &ws, io.Discard)
 	require.NoError(t, err, "should succeed even when branch is already gone")
+}
+
+func TestPerformArchive_WritesWarningsToWriter(t *testing.T) {
+	store := newArchiveTestStore(t)
+
+	executor := &mockExecutor{
+		results: []*command.ExecutionResult{
+			{Results: []command.Result{{
+				Error:  assert.AnError,
+				Output: "fatal: locked",
+			}}},
+			nil,
+		},
+	}
+
+	ws := state.WorktreeState{
+		Archived:     true,
+		Branch:       "feature/locked",
+		WorktreePath: "/tmp/wt/locked",
+	}
+
+	var warn bytes.Buffer
+	clean, err := state.PerformArchive(executor, store, "owner/repo::feature/locked", &ws, &warn)
+	require.NoError(t, err)
+	assert.False(t, clean)
+	assert.Contains(t, warn.String(), "warning: worktree remove failed")
+	assert.Contains(t, warn.String(), "fatal: locked")
 }

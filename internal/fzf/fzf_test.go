@@ -1,22 +1,32 @@
 package fzf
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 func TestExecFinder_Available(_ *testing.T) {
-	f := NewFinder()
+	f := NewFinder(nil)
 	// We can't assert true/false since fzf may or may not be installed,
 	// but we can verify it doesn't panic and returns a bool.
 	_ = f.Available()
 }
 
 func TestNewFinder(t *testing.T) {
-	f := NewFinder()
+	f := NewFinder(nil)
 	assert.NotNil(t, f)
+}
+
+func TestExecFinder_UnavailableWithoutTerminal(t *testing.T) {
+	var buf bytes.Buffer
+	f := NewFinder(&procenv.Env{Stdin: &buf, Stdout: &buf, Stderr: &buf})
+
+	assert.False(t, f.Available())
 }
 
 func TestErrCanceled(t *testing.T) {
@@ -31,7 +41,7 @@ func TestExecFinder_Find_BinaryNotFound(t *testing.T) {
 	// that as "fzf failed: …" and must NOT return ErrCanceled.
 	t.Setenv("PATH", "/nonexistent/path")
 
-	f := NewFinder()
+	f := NewFinder(nil)
 	_, err := f.Find([]string{"item1", "item2"}, "")
 
 	require.Error(t, err)

@@ -17,7 +17,7 @@ func TestRunMaintenance_SilentlySkipsNonGitDir(t *testing.T) {
 	t.Cleanup(func() { maintGetwd = origGetwd })
 
 	origNewGitRepo := maintNewGitRepo
-	maintNewGitRepo = git.NewRepository // will fail on tmpdir
+	maintNewGitRepo = newRepository // will fail on tmpdir
 	t.Cleanup(func() { maintNewGitRepo = origNewGitRepo })
 
 	var buf nopWriter
@@ -34,9 +34,9 @@ func TestRunMaintenance_SilentlySkipsNoRemote(t *testing.T) {
 	t.Cleanup(func() { maintGetwd = origGetwd })
 
 	origNewGitRepo := maintNewGitRepo
-	maintNewGitRepo = func(_ string) (*git.Repository, error) {
+	maintNewGitRepo = func(_ context.Context, _ string) (*git.Repository, error) {
 		// Return a repo backed by a path that has no origin remote
-		return git.NewRepository(dir)
+		return git.NewRepository(dir, nil)
 	}
 	t.Cleanup(func() { maintNewGitRepo = origNewGitRepo })
 

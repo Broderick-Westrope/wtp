@@ -16,6 +16,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
@@ -79,17 +80,18 @@ func removeCommand(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Initialize repository to check if we're in a git repo
-	_, err = git.NewRepository(cwd)
+	_, err = newRepository(ctx, cwd)
 	if err != nil {
 		return errors.NotInGitRepository()
 	}
 
 	// Use CommandExecutor-based implementation
-	executor := command.NewRealExecutor()
-	return removeCommandWithCommandExecutor(cmd, w, executor, cwd, worktreeName, force, keepBranch, forceBranch)
+	executor := command.NewRealExecutor(procenv.From(ctx))
+	return removeCommandWithCommandExecutor(ctx, cmd, w, executor, cwd, worktreeName, force, keepBranch, forceBranch)
 }
 
 func removeCommandWithCommandExecutor(
+	ctx context.Context,
 	_ *cli.Command,
 	w io.Writer,
 	executor command.Executor,
@@ -142,7 +144,7 @@ func removeCommandWithCommandExecutor(
 		return errors.WorktreeRemovalFailed(targetWorktree.Path, result.Results[0].Error)
 	}
 	// Best-effort: clean up state and cache entries for the removed worktree.
-	cleanupWorktreeStateAndCache(cwd, targetWorktree.Branch)
+	cleanupWorktreeStateAndCache(ctx, cwd, targetWorktree.Branch)
 	// Best-effort: remove empty centralized storage directories.
 	cleanupCentralizedWorktreeDir(targetWorktree.Path)
 
@@ -248,12 +250,12 @@ func cleanupCentralizedWorktreeDir(worktreePath string) {
 
 // cleanupWorktreeStateAndCache removes state and cache entries for the given branch after a
 // successful worktree removal. All errors are silently ignored (best-effort).
-func cleanupWorktreeStateAndCache(cwd, branch string) {
+func cleanupWorktreeStateAndCache(ctx context.Context, cwd, branch string) {
 	if branch == "" {
 		return
 	}
 
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return
 	}
@@ -308,7 +310,7 @@ func getWorktreesForRemove(ctx context.Context, w io.Writer) error {
 	}
 
 	// Initialize repository
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return err
 	}

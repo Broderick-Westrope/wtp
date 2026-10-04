@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 const (
@@ -71,13 +73,22 @@ func IsAvailable() bool {
 	return err == nil
 }
 
+// ghCommand builds a gh invocation that runs in dir with the environment
+// carried by ctx (see procenv).
+func ghCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = dir
+	cmd.Env = procenv.From(ctx).Environ
+	return cmd
+}
+
 // IsAuthenticated reports whether the `gh` CLI is authenticated.
-// It runs `gh auth status` and checks the exit code.
-func IsAuthenticated() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+// It runs `gh auth status` in dir and checks the exit code.
+func IsAuthenticated(ctx context.Context, dir string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "auth", "status")
+	cmd := ghCommand(ctx, dir, "auth", "status")
 	if err := cmd.Run(); err != nil {
 		// Non-zero exit = not authenticated (or gh unavailable)
 		var exitErr *exec.ExitError
@@ -91,13 +102,13 @@ func IsAuthenticated() (bool, error) {
 	return true, nil
 }
 
-// GetPRForBranch fetches pull request metadata for the given branch.
-// Returns (nil, nil) if no PR exists for the branch.
-func GetPRForBranch(ctx context.Context, branch string) (*PRInfo, error) {
+// GetPRForBranch fetches pull request metadata for the given branch, running
+// gh in the repository directory dir. Returns (nil, nil) if no PR exists for the branch.
+func GetPRForBranch(ctx context.Context, dir, branch string) (*PRInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "pr", "view",
+	cmd := ghCommand(ctx, dir, "pr", "view",
 		"--json", "number,state,title,headRefName,isDraft,closedAt", "--", branch)
 
 	var stdout, stderr bytes.Buffer
@@ -138,13 +149,13 @@ func GetPRForBranch(ctx context.Context, branch string) (*PRInfo, error) {
 	return pr, nil
 }
 
-// GetCIStatus fetches aggregated CI check status for the given branch.
-// Returns (nil, nil) if there is no PR or no checks are present.
-func GetCIStatus(ctx context.Context, branch string) (*CIStatus, error) {
+// GetCIStatus fetches aggregated CI check status for the given branch, running
+// gh in the repository directory dir. Returns (nil, nil) if there is no PR or no checks are present.
+func GetCIStatus(ctx context.Context, dir, branch string) (*CIStatus, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "gh", "pr", "checks",
+	cmd := ghCommand(ctx, dir, "pr", "checks",
 		"--json", "name,state", "--", branch)
 
 	var stdout, stderr bytes.Buffer

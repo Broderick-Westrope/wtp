@@ -5,9 +5,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 // ErrCanceled is returned when the user cancels the fzf selection (Esc or Ctrl-C).
@@ -15,7 +16,8 @@ var ErrCanceled = errors.New("selection canceled")
 
 // Finder selects an item from a list via interactive fuzzy matching.
 type Finder interface {
-	// Available reports whether fzf is installed and on PATH.
+	// Available reports whether fzf can be used: it is installed and on PATH
+	// and the environment has a terminal to draw on.
 	Available() bool
 
 	// Find presents items via fzf and returns the selected item.
@@ -25,18 +27,28 @@ type Finder interface {
 }
 
 // ExecFinder implements Finder by shelling out to the fzf binary.
-type ExecFinder struct{}
+type ExecFinder struct {
+	env *procenv.Env
+}
 
-// NewFinder creates a Finder backed by the fzf binary.
-func NewFinder() *ExecFinder {
-	return &ExecFinder{}
+// NewFinder creates a Finder backed by the fzf binary that runs within env.
+// A nil env uses the current process.
+func NewFinder(env *procenv.Env) *ExecFinder {
+	if env == nil {
+		env = procenv.Default()
+	}
+	return &ExecFinder{env: env}
 }
 
 // fzfExitInterrupted is fzf's exit code for Ctrl-C / Esc.
 const fzfExitInterrupted = 130
 
-// Available reports whether fzf is installed and on PATH.
-func (*ExecFinder) Available() bool {
+// Available reports whether fzf is installed and on PATH and the environment's
+// stderr is a terminal fzf can draw on.
+func (f *ExecFinder) Available() bool {
+	if !procenv.IsTerminal(f.env.Stderr) {
+		return false
+	}
 	_, err := exec.LookPath("fzf")
 	return err == nil
 }
@@ -44,7 +56,7 @@ func (*ExecFinder) Available() bool {
 // Find launches fzf with the given items and optional query.
 // When query is non-empty it is pre-filled in fzf's search bar.
 // If there is exactly one fuzzy match, fzf auto-selects it (--select-1).
-func (*ExecFinder) Find(items []string, query string) (string, error) {
+func (f *ExecFinder) Find(items []string, query string) (string, error) {
 	args := []string{
 		"--select-1",
 		"--height=~50%",
@@ -58,7 +70,9 @@ func (*ExecFinder) Find(items []string, query string) (string, error) {
 
 	cmd := exec.Command("fzf", args...)
 	cmd.Stdin = strings.NewReader(strings.Join(items, "\n"))
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = f.env.Stderr
+	cmd.Dir = f.env.Dir
+	cmd.Env = f.env.Environ
 
 	var out bytes.Buffer
 	cmd.Stdout = &out

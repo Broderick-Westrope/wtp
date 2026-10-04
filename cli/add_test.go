@@ -410,7 +410,9 @@ func TestAddCommand_CommandConstruction(t *testing.T) {
 			cfg := &config.Config{}
 
 			var errBuf bytes.Buffer
-			err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(tt.originURL))
+			err := addCommandWithCommandExecutor(
+				t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(tt.originURL),
+			)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -457,7 +459,7 @@ func TestAddCommand_SuccessMessage(t *testing.T) {
 
 			var errBuf bytes.Buffer
 			err := addCommandWithCommandExecutor(
-				cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+				t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
 			)
 
 			assert.NoError(t, err)
@@ -503,7 +505,7 @@ func TestAddCommand_NoOriginRemote(t *testing.T) {
 	mockExec := &mockCommandExecutor{}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", noOriginRemote())
+	err := addCommandWithCommandExecutor(t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", noOriginRemote())
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no 'origin' remote found")
@@ -521,7 +523,9 @@ func TestAddCommand_UnparseableURL(t *testing.T) {
 
 	// SCP-style URL without a path (no owner/repo)
 	badURL := "git@github.com:"
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(badURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(badURL),
+	)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "could not parse remote URL")
@@ -537,7 +541,9 @@ func TestAddCommand_ExecutionError(t *testing.T) {
 	cmd := createTestCLICommand(map[string]any{"branch": "feature/auth"}, []string{"feature/auth"})
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+	)
 
 	assert.Error(t, err)
 	assert.Len(t, mockExec.executedCommands, 1)
@@ -561,7 +567,9 @@ func TestAddCommand_ExecFailureKeepsCreationContext(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, exec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, exec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+	)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "worktree was created")
@@ -601,7 +609,7 @@ func TestAddCommand_InternationalCharacters(t *testing.T) {
 			cfg := &config.Config{}
 
 			err := addCommandWithCommandExecutor(
-				cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+				t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
 			)
 
 			assert.NoError(t, err)
@@ -663,7 +671,9 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 		cmd := createTestCLICommand(map[string]any{}, []string{"main"})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+		err := addCommandWithCommandExecutor(
+			t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+		)
 
 		// resolveBranchTracking calls git.NewRepository which requires a real repo
 		assert.Error(t, err)
@@ -680,7 +690,9 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 		cmd := createTestCLICommand(map[string]any{"branch": "feature/new"}, []string{})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+		err := addCommandWithCommandExecutor(
+			t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+		)
 
 		assert.NoError(t, err)
 		assert.Len(t, mockExec.executedCommands, 1)
@@ -700,7 +712,9 @@ func TestAddCommand_SimplifiedInterface(t *testing.T) {
 		cmd := createTestCLICommand(map[string]any{"branch": "hotfix/urgent"}, []string{"main"})
 		cfg := &config.Config{}
 
-		err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+		err := addCommandWithCommandExecutor(
+			t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+		)
 
 		assert.NoError(t, err)
 		assert.Len(t, mockExec.executedCommands, 1)
@@ -805,7 +819,7 @@ func TestExecutePostCreateHooks_Integration(t *testing.T) {
 		cfg := &config.Config{}
 		var buf bytes.Buffer
 
-		err := executePostCreateHooks(&buf, cfg, "/test/repo", "/test/worktree")
+		err := executePostCreateHooks(&buf, nil, cfg, "/test/repo", "/test/worktree")
 
 		assert.NoError(t, err)
 		assert.Empty(t, buf.String())
@@ -821,7 +835,7 @@ func TestExecutePostCreateHooks_Integration(t *testing.T) {
 		}
 		var buf bytes.Buffer
 
-		err := executePostCreateHooks(&buf, cfg, "/test/repo", "/test/worktree")
+		err := executePostCreateHooks(&buf, nil, cfg, "/test/repo", "/test/worktree")
 
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to execute hook")
@@ -953,7 +967,7 @@ func TestAddCommand_HookPathResolution(t *testing.T) {
 	// (we don't actually run the hook since the paths don't exist, just verify no panic)
 	var buf bytes.Buffer
 	// This will fail because .env.example doesn't exist, but we're testing path wiring
-	_ = executePostCreateHooks(&buf, cfg, repoRoot, expectedWorktreePath)
+	_ = executePostCreateHooks(&buf, nil, cfg, repoRoot, expectedWorktreePath)
 	// The hook executor is initialized with repoRoot as source base — no panic is the key assertion
 }
 
@@ -1108,7 +1122,9 @@ func TestAddCommand_EmitsMarkerWhenHooked(t *testing.T) {
 	mockExec := &mockCommandExecutor{}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+	)
 
 	require.NoError(t, err)
 	expectedPath := filepath.Join(xdg.WorktreeStorageRoot(), "owner", "repo", "feature", "test")
@@ -1126,7 +1142,9 @@ func TestAddCommand_NoMarkerWhenStay(t *testing.T) {
 	mockExec := &mockCommandExecutor{}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+	)
 
 	require.NoError(t, err)
 	assert.Empty(t, errBuf.String())
@@ -1143,7 +1161,9 @@ func TestAddCommand_NoMarkerWhenNotHooked(t *testing.T) {
 	mockExec := &mockCommandExecutor{}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+	)
 
 	require.NoError(t, err)
 	assert.Empty(t, errBuf.String())
@@ -1159,7 +1179,9 @@ func TestAddCommand_SuccessMessageShowsCdHint_WhenStay(t *testing.T) {
 	mockExec := &mockCommandExecutor{}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+	)
 
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "💡 To switch to the new worktree, run:")
@@ -1177,7 +1199,9 @@ func TestAddCommand_SuccessMessageShowsChanged_WhenNotStay(t *testing.T) {
 	mockExec := &mockCommandExecutor{}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, mockExec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+	)
 
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "📍 Changed to worktree directory.")
@@ -1203,7 +1227,9 @@ func TestAddCommand_MarkerEmittedBeforeExecError(t *testing.T) {
 	}
 	cfg := &config.Config{}
 
-	err := addCommandWithCommandExecutor(cmd, &buf, &errBuf, exec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL))
+	err := addCommandWithCommandExecutor(
+		t.Context(), cmd, &buf, &errBuf, exec, cfg, "/test/repo", mockGetRemoteURL(testOriginURL),
+	)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "worktree was created")

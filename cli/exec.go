@@ -11,6 +11,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 // NewExecCommand creates the exec command definition.
@@ -31,14 +32,14 @@ func execCommand(ctx context.Context, cmd *cli.Command) error {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	_, err = git.NewRepository(cwd)
+	_, err = newRepository(ctx, cwd)
 	if err != nil {
 		return errors.NotInGitRepository()
 	}
 
 	w := stdoutFor(ctx, cmd)
 
-	executor := command.NewRealExecutor()
+	executor := command.NewRealExecutor(procenv.From(ctx))
 	return execCommandWithCommandExecutor(cmd, w, executor)
 }
 

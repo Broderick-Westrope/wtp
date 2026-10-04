@@ -18,7 +18,7 @@ import (
 )
 
 func TestExecutePostCreateHooks_NilConfig(t *testing.T) {
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 	var buf bytes.Buffer
 	err := executor.ExecutePostCreateHooks(&buf, "/test/worktree")
 	assert.NoError(t, err)
@@ -30,7 +30,7 @@ func TestExecutePostCreateHooks_NoHooks(t *testing.T) {
 			PostCreate: []config.Hook{},
 		},
 	}
-	executor := NewExecutor(cfg, "/test/repo")
+	executor := NewExecutor(cfg, "/test/repo", nil)
 	var buf bytes.Buffer
 	err := executor.ExecutePostCreateHooks(&buf, "/test/worktree")
 	assert.NoError(t, err)
@@ -79,7 +79,7 @@ func assertPostCreateHookRejectsSelfPath(t *testing.T, hookType string) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err := executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.Error(t, err)
@@ -100,7 +100,7 @@ func TestExecutePostCreateHooks_InvalidHookType(t *testing.T) {
 			},
 		},
 	}
-	executor := NewExecutor(cfg, "/test/repo")
+	executor := NewExecutor(cfg, "/test/repo", nil)
 	var buf bytes.Buffer
 	err := executor.ExecutePostCreateHooks(&buf, "/test/worktree")
 	assert.Error(t, err)
@@ -137,7 +137,7 @@ func TestExecutePostCreateHooks_CopyFile(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -182,7 +182,7 @@ func TestExecutePostCreateHooks_Symlink(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -225,7 +225,7 @@ func TestExecutePostCreateHooks_Symlink_SourceMissing(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.Error(t, err)
@@ -265,7 +265,7 @@ func TestExecutePostCreateHooks_Symlink_DestinationExists(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.Error(t, err)
@@ -295,7 +295,7 @@ func TestExecutePostCreateHooks_Symlink_PathTraversal(t *testing.T) {
 			},
 		}
 
-		executor := NewExecutor(cfg, repoRoot)
+		executor := NewExecutor(cfg, repoRoot, nil)
 		var buf bytes.Buffer
 		err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 		assert.Error(t, err)
@@ -315,7 +315,7 @@ func TestExecutePostCreateHooks_Symlink_PathTraversal(t *testing.T) {
 			},
 		}
 
-		executor := NewExecutor(cfg, repoRoot)
+		executor := NewExecutor(cfg, repoRoot, nil)
 		var buf bytes.Buffer
 		err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 		assert.Error(t, err)
@@ -350,7 +350,7 @@ func TestExecutePostCreateHooks_Command(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -403,7 +403,7 @@ func TestExecutePostCreateHooks_MultipleHooks(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -455,7 +455,7 @@ func TestExecutePostCreateHooks_CommandWithEnv(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -494,7 +494,7 @@ func TestExecutePostCreateHooks_CommandWithWorkDir(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -531,7 +531,7 @@ func TestExecutePostCreateHooks_CommandFailure(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.Error(t, err)
@@ -562,7 +562,7 @@ func TestExecutePostCreateHooks_CopyNonExistentFile(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.Error(t, err)
@@ -599,7 +599,7 @@ func TestExecutePostCreateHooks_CopyToNestedDirectory(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -642,7 +642,7 @@ func TestExecutePostCreateHooks_AbsoluteWorkDir(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -679,7 +679,7 @@ func TestExecutePostCreateHooks_EnvironmentVariables(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -688,6 +688,33 @@ func TestExecutePostCreateHooks_EnvironmentVariables(t *testing.T) {
 	output := buf.String()
 	assert.Contains(t, output, fmt.Sprintf("WORKTREE=%s", worktreeDir))
 	assert.Contains(t, output, fmt.Sprintf("REPO=%s", repoRoot))
+}
+
+func TestExecutePostCreateHooks_UsesProvidedEnviron(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping command test on Windows")
+	}
+
+	t.Setenv("WTP_HOOK_PROCESS_ONLY", "process")
+	worktreeDir := t.TempDir()
+	cfg := &config.Config{
+		Hooks: config.Hooks{
+			PostCreate: []config.Hook{
+				{
+					Type:    config.HookTypeCommand,
+					Command: "echo VALUE=$WTP_HOOK_VALUE PROCESS=$WTP_HOOK_PROCESS_ONLY SHELL_INT=$WTP_SHELL_INTEGRATION",
+				},
+			},
+		},
+	}
+
+	environ := []string{"WTP_HOOK_VALUE=embedded", "WTP_SHELL_INTEGRATION=1"}
+	executor := NewExecutor(cfg, t.TempDir(), environ)
+	var buf bytes.Buffer
+	require.NoError(t, executor.ExecutePostCreateHooks(&buf, worktreeDir))
+
+	output := buf.String()
+	assert.Contains(t, output, "VALUE=embedded PROCESS= SHELL_INT=\n")
 }
 
 // streamingWriter tracks when writes occur to verify real-time streaming
@@ -720,7 +747,7 @@ func TestExecutePostCreateHooks_StreamingOutput(t *testing.T) {
 	cfg := createStreamingTestConfig(scriptPath)
 
 	sw := &streamingWriter{}
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 
 	err := executor.ExecutePostCreateHooks(sw, worktreeDir)
 	if err != nil {
@@ -838,7 +865,7 @@ func TestExecutePostCreateHooks_CommandWithLargeOutput(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 
 	err := executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	if err != nil {
@@ -885,7 +912,7 @@ func TestExecutePostCreateHooks_CopyDirectoryRecursively(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -935,7 +962,7 @@ func TestExecutePostCreateHooks_CopyFilePreservesPermissions(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -989,7 +1016,7 @@ func TestExecutePostCreateHooks_CopyWithAbsolutePaths(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -1036,7 +1063,7 @@ func TestExecutePostCreateHooks_CopyRejectsSymlinkToSource(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err := executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.Error(t, err)
@@ -1049,7 +1076,7 @@ func TestExecutePostCreateHooks_CopyRejectsSymlinkToSource(t *testing.T) {
 
 // Error handling tests for copyFile function
 func TestExecutor_copyFile_SourceFileOpenError(t *testing.T) {
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 
 	// Try to copy non-existent file
 	err := executor.copyFile("/nonexistent/source.txt", "/tmp/dest.txt")
@@ -1066,7 +1093,7 @@ func TestExecutor_copyFile_DestinationCreateError(t *testing.T) {
 	err := os.WriteFile(srcFile, []byte("test content"), 0644)
 	require.NoError(t, err)
 
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 
 	// Try to create file in non-existent directory without creating parent dirs
 	invalidDest := "/nonexistent/directory/dest.txt"
@@ -1089,7 +1116,7 @@ func TestExecutor_copyFile_PermissionGetError(t *testing.T) {
 	err := os.WriteFile(srcFile, []byte("test content"), 0644)
 	require.NoError(t, err)
 
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 
 	// Copy the file first
 	err = executor.copyFile(srcFile, dstFile)
@@ -1107,7 +1134,7 @@ func TestExecutor_copyFile_PermissionGetError(t *testing.T) {
 
 // Error handling tests for copyDir function
 func TestExecutor_copyDir_SourceDirectoryNotExist(t *testing.T) {
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 
 	// Try to copy non-existent directory
 	err := executor.copyDir("/nonexistent/source", "/tmp/dest")
@@ -1124,7 +1151,7 @@ func TestExecutor_copyDir_DestinationCreateError(t *testing.T) {
 	err := os.MkdirAll(srcDir, directoryPermissions)
 	require.NoError(t, err)
 
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 
 	// Create a file where the destination directory should be to force an error
 	invalidDest := filepath.Join(tempDir, "existing-file")
@@ -1147,7 +1174,7 @@ func TestExecutor_copyDir_ReadDirectoryError(t *testing.T) {
 	err := os.WriteFile(srcDir, []byte("not a directory"), 0644)
 	require.NoError(t, err)
 
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 
 	err = executor.copyDir(srcDir, dstDir)
 	assert.Error(t, err)
@@ -1174,7 +1201,7 @@ func TestExecutor_copyDir_NestedDirectorySuccess(t *testing.T) {
 	err = os.WriteFile(filepath.Join(level2, "level2.txt"), []byte("level2 content"), 0644)
 	require.NoError(t, err)
 
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 
 	err = executor.copyDir(srcDir, dstDir)
 	assert.NoError(t, err)
@@ -1212,7 +1239,7 @@ func TestExecutor_copyDir_FailsWhenNestedFileCannotBeCopied(t *testing.T) {
 	err = os.MkdirAll(conflictingDest, directoryPermissions)
 	require.NoError(t, err)
 
-	executor := NewExecutor(nil, "/test/repo")
+	executor := NewExecutor(nil, "/test/repo", nil)
 
 	err = executor.copyDir(srcDir, dstDir)
 	assert.Error(t, err)
@@ -1249,7 +1276,7 @@ func TestExecutePostCreateHooks_CopyEmptyFile(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -1290,7 +1317,7 @@ func TestExecutePostCreateHooks_CopyEmptyDirectory(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)
@@ -1337,7 +1364,7 @@ func TestExecutePostCreateHooks_CopyFileWithSpecialCharacters(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(cfg, repoRoot)
+	executor := NewExecutor(cfg, repoRoot, nil)
 	var buf bytes.Buffer
 	err = executor.ExecutePostCreateHooks(&buf, worktreeDir)
 	assert.NoError(t, err)

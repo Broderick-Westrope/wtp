@@ -10,7 +10,6 @@ import (
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/config"
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
-	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 )
 
 const configFileMode = 0o600
@@ -38,7 +37,7 @@ func initCommand(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Initialize repository
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return errors.NotInGitRepository()
 	}

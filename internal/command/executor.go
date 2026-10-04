@@ -1,5 +1,7 @@
 package command
 
+import "github.com/Broderick-Westrope/wtp/v3/internal/procenv"
+
 // executor implements CommandExecutor interface
 type executor struct {
 	shell ShellExecutor
@@ -13,9 +15,10 @@ func NewExecutor(shell ShellExecutor) Executor {
 }
 
 // NewRealExecutor creates a new command executor with real shell execution
-func NewRealExecutor() Executor {
+// within env. A nil env uses the current process.
+func NewRealExecutor(env *procenv.Env) Executor {
 	return &executor{
-		shell: NewRealShellExecutor(),
+		shell: NewRealShellExecutor(env),
 	}
 }
 

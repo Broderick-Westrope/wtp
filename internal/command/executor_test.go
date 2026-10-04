@@ -1,9 +1,14 @@
 package command
 
 import (
+	"bytes"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 // Test that defines what we want from CommandExecutor
@@ -248,7 +253,7 @@ func TestCommandBuilder(t *testing.T) {
 func TestRealExecutor(t *testing.T) {
 	t.Run("should create real executor", func(t *testing.T) {
 		// When: creating a real executor
-		executor := NewRealExecutor()
+		executor := NewRealExecutor(nil)
 
 		// Then: should return a valid executor
 		assert.NotNil(t, executor)
@@ -257,7 +262,7 @@ func TestRealExecutor(t *testing.T) {
 
 	t.Run("should execute simple command successfully", func(t *testing.T) {
 		// Given: a real executor
-		executor := NewRealExecutor()
+		executor := NewRealExecutor(nil)
 
 		// When: executing a simple echo command
 		cmd := Command{
@@ -276,7 +281,7 @@ func TestRealExecutor(t *testing.T) {
 
 	t.Run("should handle command failure gracefully", func(t *testing.T) {
 		// Given: a real executor
-		executor := NewRealExecutor()
+		executor := NewRealExecutor(nil)
 
 		// When: executing a command that will fail
 		cmd := Command{
@@ -297,7 +302,7 @@ func TestRealExecutor(t *testing.T) {
 func TestRealShellExecutor(t *testing.T) {
 	t.Run("should create real shell executor", func(t *testing.T) {
 		// When: creating a real shell executor
-		shell := NewRealShellExecutor()
+		shell := NewRealShellExecutor(nil)
 
 		// Then: should return a valid shell executor
 		assert.NotNil(t, shell)
@@ -306,7 +311,7 @@ func TestRealShellExecutor(t *testing.T) {
 
 	t.Run("should execute command and return output", func(t *testing.T) {
 		// Given: a real shell executor
-		shell := NewRealShellExecutor()
+		shell := NewRealShellExecutor(nil)
 
 		// When: executing a simple command
 		output, err := shell.Execute("echo", []string{"test output"}, "", false)
@@ -318,7 +323,7 @@ func TestRealShellExecutor(t *testing.T) {
 
 	t.Run("should handle command with working directory", func(t *testing.T) {
 		// Given: a real shell executor
-		shell := NewRealShellExecutor()
+		shell := NewRealShellExecutor(nil)
 
 		// When: executing pwd command in /tmp directory
 		output, err := shell.Execute("pwd", []string{}, "/tmp", false)
@@ -330,7 +335,7 @@ func TestRealShellExecutor(t *testing.T) {
 
 	t.Run("should handle command failure", func(t *testing.T) {
 		// Given: a real shell executor
-		shell := NewRealShellExecutor()
+		shell := NewRealShellExecutor(nil)
 
 		// When: executing a command that doesn't exist
 		_, err := shell.Execute("nonexistent-command-xyz", []string{}, "", false)
@@ -342,7 +347,7 @@ func TestRealShellExecutor(t *testing.T) {
 
 	t.Run("should trim whitespace from output", func(t *testing.T) {
 		// Given: a real shell executor
-		shell := NewRealShellExecutor()
+		shell := NewRealShellExecutor(nil)
 
 		// When: executing command that produces output with trailing newline
 		output, err := shell.Execute("printf", []string{"test\n"}, "", false)
@@ -350,6 +355,28 @@ func TestRealShellExecutor(t *testing.T) {
 		// Then: output should be trimmed (strings.TrimSpace removes leading/trailing whitespace)
 		assert.NoError(t, err)
 		assert.Equal(t, "test", output) // TrimSpace removes newlines and spaces
+	})
+
+	t.Run("should default to env dir and environ", func(t *testing.T) {
+		dir, err := filepath.EvalSymlinks(t.TempDir())
+		require.NoError(t, err)
+		shell := NewRealShellExecutor(&procenv.Env{Dir: dir, Environ: []string{"WTP_TEST_VALUE=from-env"}})
+
+		output, err := shell.Execute("sh", []string{"-c", "pwd; echo $WTP_TEST_VALUE"}, "", false)
+
+		require.NoError(t, err)
+		assert.Equal(t, dir+"\nfrom-env", output)
+	})
+
+	t.Run("should capture interactive output when env streams are not terminals", func(t *testing.T) {
+		var buf bytes.Buffer
+		shell := NewRealShellExecutor(&procenv.Env{Dir: t.TempDir(), Stdin: &buf, Stdout: &buf, Stderr: &buf})
+
+		output, err := shell.Execute("echo", []string{"captured"}, "", true)
+
+		require.NoError(t, err)
+		assert.Equal(t, "captured", output)
+		assert.Empty(t, buf.String())
 	})
 }
 

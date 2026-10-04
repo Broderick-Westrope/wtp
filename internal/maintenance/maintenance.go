@@ -17,6 +17,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/config"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 	"github.com/Broderick-Westrope/wtp/v3/internal/github"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
@@ -27,8 +28,8 @@ var (
 	isGHAvailable   = github.IsAvailable
 	getPRForBranch  = github.GetPRForBranch
 	newExecutor     = command.NewRealExecutor
-	isWorktreeDirty = func(mainRepoPath, worktreePath string) (bool, error) {
-		repo, err := git.NewRepository(mainRepoPath)
+	isWorktreeDirty = func(ctx context.Context, mainRepoPath, worktreePath string) (bool, error) {
+		repo, err := git.NewRepository(mainRepoPath, procenv.From(ctx).Environ)
 		if err != nil {
 			return false, err
 		}
@@ -164,7 +165,7 @@ func (r *Runner) RunExpensive(ctx context.Context) error { //nolint:gocyclo // o
 		return nil
 	}
 
-	executor := newExecutor()
+	executor := newExecutor(procenv.From(ctx))
 
 	listCmd := command.GitWorktreeList()
 	result, err := executor.Execute([]command.Command{listCmd})
@@ -199,7 +200,7 @@ func (r *Runner) RunExpensive(ctx context.Context) error { //nolint:gocyclo // o
 			continue
 		}
 
-		pr, prErr := getPRForBranch(ctx, wt.Branch)
+		pr, prErr := getPRForBranch(ctx, r.mainRepoPath, wt.Branch)
 		if prErr != nil {
 			_, _ = fmt.Fprintf(r.stderr, "warning: failed to check PR for %s: %v\n", wt.Branch, prErr)
 			continue
@@ -213,7 +214,7 @@ func (r *Runner) RunExpensive(ctx context.Context) error { //nolint:gocyclo // o
 			continue
 		}
 
-		dirty, dirtyErr := isWorktreeDirty(r.mainRepoPath, wt.Path)
+		dirty, dirtyErr := isWorktreeDirty(ctx, r.mainRepoPath, wt.Path)
 		if dirtyErr != nil {
 			_, _ = fmt.Fprintf(r.stderr, "warning: failed to check dirty status for %s: %v\n", wt.Branch, dirtyErr)
 			continue
@@ -238,7 +239,7 @@ func (r *Runner) RunExpensive(ctx context.Context) error { //nolint:gocyclo // o
 			WorktreePath: wt.Path,
 		}
 
-		if _, archiveErr := state.PerformArchive(executor, r.stateStore, key, archiveWS); archiveErr != nil {
+		if _, archiveErr := state.PerformArchive(executor, r.stateStore, key, archiveWS, r.stderr); archiveErr != nil {
 			_, _ = fmt.Fprintf(r.stderr, "warning: failed to auto-archive %s: %v\n", wt.Branch, archiveErr)
 			continue
 		}

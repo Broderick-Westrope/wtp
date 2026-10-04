@@ -1243,7 +1243,7 @@ func TestListCommand_AllShowsArchived(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetRemote := listGetRemoteURL
-	listGetRemoteURL = func(_ string) (string, error) {
+	listGetRemoteURL = func(_ context.Context, _ string) (string, error) {
 		return "https://github.com/owner/repo.git", nil
 	}
 	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
@@ -1319,7 +1319,7 @@ func TestListCommand_AllSynthesizesArchivedFromState(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetRemote := listGetRemoteURL
-	listGetRemoteURL = func(_ string) (string, error) {
+	listGetRemoteURL = func(_ context.Context, _ string) (string, error) {
 		return "https://github.com/owner/repo.git", nil
 	}
 	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
@@ -1414,14 +1414,14 @@ func TestListCommand_NoSync_SkipsGHCalls(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ context.Context, _ string) (*github.PRInfo, error) {
+	listGetPRForBranch = func(_ context.Context, _, _ string) (*github.PRInfo, error) {
 		ghCallCount++
 		return nil, nil
 	}
 	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
 
 	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ context.Context, _ string) (*github.CIStatus, error) {
+	listGetCIStatus = func(_ context.Context, _, _ string) (*github.CIStatus, error) {
 		ghCallCount++
 		return nil, nil
 	}
@@ -1474,13 +1474,13 @@ func TestListCommand_DoesNotAutoArchive(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetRemote := listGetRemoteURL
-	listGetRemoteURL = func(_ string) (string, error) {
+	listGetRemoteURL = func(_ context.Context, _ string) (string, error) {
 		return "https://github.com/owner/repo.git", nil
 	}
 	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
 
 	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ context.Context, branch string) (*github.PRInfo, error) {
+	listGetPRForBranch = func(_ context.Context, _, branch string) (*github.PRInfo, error) {
 		if branch == "feature/merged" {
 			return &github.PRInfo{Number: 42, State: "MERGED", Title: "Merged PR"}, nil
 		}
@@ -1489,7 +1489,7 @@ func TestListCommand_DoesNotAutoArchive(t *testing.T) {
 	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
 
 	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ context.Context, _ string) (*github.CIStatus, error) {
+	listGetCIStatus = func(_ context.Context, _, _ string) (*github.CIStatus, error) {
 		return nil, nil
 	}
 	t.Cleanup(func() { listGetCIStatus = oldGetCI })
@@ -1577,7 +1577,7 @@ func TestListCommand_QuietNoSyncSideEffectFree(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ context.Context, _ string) (*github.PRInfo, error) {
+	listGetPRForBranch = func(_ context.Context, _, _ string) (*github.PRInfo, error) {
 		ghCallCount++
 		return nil, nil
 	}
@@ -1631,13 +1631,13 @@ func TestListCommand_WithGHColumns(t *testing.T) {
 	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
 
 	oldGetRemote := listGetRemoteURL
-	listGetRemoteURL = func(_ string) (string, error) {
+	listGetRemoteURL = func(_ context.Context, _ string) (string, error) {
 		return "https://github.com/owner/repo.git", nil
 	}
 	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
 
 	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ context.Context, branch string) (*github.PRInfo, error) {
+	listGetPRForBranch = func(_ context.Context, _, branch string) (*github.PRInfo, error) {
 		if branch == "feature/auth" {
 			return &github.PRInfo{Number: 42, State: "OPEN"}, nil
 		}
@@ -1646,7 +1646,7 @@ func TestListCommand_WithGHColumns(t *testing.T) {
 	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
 
 	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ context.Context, branch string) (*github.CIStatus, error) {
+	listGetCIStatus = func(_ context.Context, _, branch string) (*github.CIStatus, error) {
 		if branch == "feature/auth" {
 			return &github.CIStatus{State: "passing", Total: 3, Passing: 3}, nil
 		}

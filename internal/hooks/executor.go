@@ -23,13 +23,19 @@ const (
 type Executor struct {
 	config   *config.Config
 	repoRoot string
+	environ  []string
 }
 
-// NewExecutor creates a new hook executor
-func NewExecutor(cfg *config.Config, repoRoot string) *Executor {
+// NewExecutor creates a new hook executor. Command hooks inherit environ
+// ("KEY=value" entries); a nil environ means os.Environ().
+func NewExecutor(cfg *config.Config, repoRoot string, environ []string) *Executor {
+	if environ == nil {
+		environ = os.Environ()
+	}
 	return &Executor{
 		config:   cfg,
 		repoRoot: repoRoot,
+		environ:  environ,
 	}
 }
 
@@ -245,11 +251,10 @@ func (e *Executor) executeCommandHookWithWriter(w io.Writer, hook *config.Hook, 
 	cmd.Dir = workDir
 
 	// Set environment variables (filter out WTP_SHELL_INTEGRATION)
-	env := os.Environ()
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		if !strings.HasPrefix(e, "WTP_SHELL_INTEGRATION=") {
-			filtered = append(filtered, e)
+	filtered := make([]string, 0, len(e.environ))
+	for _, kv := range e.environ {
+		if !strings.HasPrefix(kv, "WTP_SHELL_INTEGRATION=") {
+			filtered = append(filtered, kv)
 		}
 	}
 	cmd.Env = filtered

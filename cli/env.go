@@ -6,6 +6,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
@@ -24,4 +25,8 @@ func stdoutFor(ctx context.Context, cmd *cli.Command) io.Writer {
 
 func stderrFor(ctx context.Context) io.Writer {
 	return procenv.From(ctx).Stderr
+}
+
+func newRepository(ctx context.Context, path string) (*git.Repository, error) {
+	return git.NewRepository(path, procenv.From(ctx).Environ)
 }

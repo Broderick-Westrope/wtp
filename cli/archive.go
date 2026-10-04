@@ -15,6 +15,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/config"
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
@@ -68,7 +69,7 @@ func archiveCommand(ctx context.Context, cmd *cli.Command) error {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	executor := command.NewRealExecutor()
+	executor := command.NewRealExecutor(procenv.From(ctx))
 	result, err := executor.Execute(
 		[]command.Command{command.GitWorktreeList()},
 	)
@@ -77,7 +78,7 @@ func archiveCommand(ctx context.Context, cmd *cli.Command) error {
 	}
 	worktrees := git.ParseWorktreeListOutput(result.Results[0].Output)
 
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return errors.NotInGitRepository()
 	}
@@ -93,13 +94,14 @@ func archiveCommand(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	return archiveCommandCore(
-		w, branch, cwd, force,
+		ctx, w, branch, cwd, force,
 		worktrees, repoID, state.NewStore(), executor, repo,
 	)
 }
 
 // archiveCommandCore is the testable core of the archive command.
 func archiveCommandCore(
+	ctx context.Context,
 	w io.Writer,
 	branch string,
 	cwd string,
@@ -125,7 +127,7 @@ func archiveCommandCore(
 
 	ws.SuppressAutoArchive = false
 
-	clean, archiveErr := state.PerformArchive(executor, stateStore, key, ws)
+	clean, archiveErr := state.PerformArchive(executor, stateStore, key, ws, stderrFor(ctx))
 	if archiveErr != nil {
 		return archiveErr
 	}
@@ -278,7 +280,7 @@ func unarchiveCommand(ctx context.Context, cmd *cli.Command) error {
 		return errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return errors.NotInGitRepository()
 	}
@@ -293,14 +295,15 @@ func unarchiveCommand(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("cannot unarchive: failed to parse remote URL: %w", err)
 	}
 
-	executor := command.NewRealExecutor()
+	executor := command.NewRealExecutor(procenv.From(ctx))
 	return unarchiveCommandCore(
-		w, branch, repoID, state.NewStore(), executor, repo,
+		ctx, w, branch, repoID, state.NewStore(), executor, repo,
 	)
 }
 
 // unarchiveCommandCore is the testable core of the unarchive command.
 func unarchiveCommandCore(
+	ctx context.Context,
 	w io.Writer,
 	branch string,
 	repoID remote.RepoIdentifier,
@@ -334,7 +337,7 @@ func unarchiveCommandCore(
 	}
 
 	// Re-run post-create hooks (worktree was recreated from scratch)
-	runUnarchiveHooks(w, repo, worktreePath)
+	runUnarchiveHooks(ctx, w, repo, worktreePath)
 
 	if clearErr := stateStore.ClearArchived(key); clearErr != nil {
 		return fmt.Errorf("failed to clear archived state: %w", clearErr)
@@ -417,7 +420,7 @@ func createWorktreeFromSHA(
 
 // runUnarchiveHooks loads the repo config and runs post-create hooks.
 // Failures are printed as warnings rather than causing the unarchive to fail.
-func runUnarchiveHooks(w io.Writer, repo gitQuerier, worktreePath string) {
+func runUnarchiveHooks(ctx context.Context, w io.Writer, repo gitQuerier, worktreePath string) {
 	mainPath, err := repo.GetMainWorktreePath()
 	if err != nil {
 		return
@@ -426,7 +429,7 @@ func runUnarchiveHooks(w io.Writer, repo gitQuerier, worktreePath string) {
 	if err != nil {
 		return
 	}
-	if hookErr := executePostCreateHooks(w, cfg, mainPath, worktreePath); hookErr != nil {
+	if hookErr := executePostCreateHooks(w, procenv.From(ctx).Environ, cfg, mainPath, worktreePath); hookErr != nil {
 		_, _ = fmt.Fprintf(w, "Warning: Hook execution failed: %v\n", hookErr)
 	}
 }
@@ -459,7 +462,7 @@ func completeNonArchivedBranches(ctx context.Context, _ *cli.Command) {
 		return
 	}
 
-	executor := command.NewRealExecutor()
+	executor := command.NewRealExecutor(procenv.From(ctx))
 	result, err := executor.Execute(
 		[]command.Command{command.GitWorktreeList()},
 	)
@@ -469,7 +472,7 @@ func completeNonArchivedBranches(ctx context.Context, _ *cli.Command) {
 	worktrees := git.ParseWorktreeListOutput(result.Results[0].Output)
 
 	var repoID *remote.RepoIdentifier
-	if repo, repoErr := git.NewRepository(cwd); repoErr == nil {
+	if repo, repoErr := newRepository(ctx, cwd); repoErr == nil {
 		if remoteURL, urlErr := repo.GetRemoteURL("origin"); urlErr == nil {
 			if id, parseErr := remote.Parse(remoteURL); parseErr == nil {
 				repoID = &id
@@ -501,7 +504,7 @@ func completeArchivedBranches(ctx context.Context, _ *cli.Command) {
 		return
 	}
 
-	repo, err := git.NewRepository(cwd)
+	repo, err := newRepository(ctx, cwd)
 	if err != nil {
 		return
 	}

@@ -119,7 +119,7 @@ func callArchive(
 ) error {
 	t.Helper()
 	return archiveCommandCore(
-		buf, branch, cwd, force,
+		t.Context(), buf, branch, cwd, force,
 		worktrees, testRepoID, stateStore, exec, repo,
 	)
 }
@@ -135,7 +135,7 @@ func callUnarchive(
 ) error {
 	t.Helper()
 	return unarchiveCommandCore(
-		buf, branch, testRepoID, stateStore, exec, repo,
+		t.Context(), buf, branch, testRepoID, stateStore, exec, repo,
 	)
 }
 
