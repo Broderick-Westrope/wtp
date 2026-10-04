@@ -53,7 +53,7 @@ func Run(ctx context.Context, args []string, env Env) error { //nolint:gocritic 
 	app.ErrWriter = resolved.Stderr
 	app.ExitErrHandler = func(context.Context, *cli.Command, error) {}
 
-	return app.Run(ctx, normalizeCompletionArgs(ctx, args))
+	return runApp(ctx, app, normalizeCompletionArgs(ctx, args))
 }
 
 func (e *Env) resolve(args []string) *procenv.Env {
