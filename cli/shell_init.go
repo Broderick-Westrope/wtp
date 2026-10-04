@@ -12,6 +12,8 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
+const completionCommandName = "completion"
+
 var allowedShells = map[string]struct{}{
 	"bash": {},
 	"zsh":  {},
@@ -36,7 +38,7 @@ func runCompletionCommand(ctx context.Context, shell string) ([]byte, error) {
 		self = []string{"wtp"}
 	}
 
-	argv := append(slices.Clone(self), "completion", shell)
+	argv := append(slices.Clone(self), completionCommandName, shell)
 	return execCompletion(ctx, argv)
 }
 

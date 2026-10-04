@@ -17,7 +17,7 @@ func newApp() *cli.Command {
 		ConfigureShellCompletionCommand: configureCompletionCommand,
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			switch cmd.Args().First() {
-			case "shell-init", "hook", "completion":
+			case "shell-init", "hook", completionCommandName:
 				return ctx, nil
 			}
 			_ = runMaintenance(ctx, stderrFor(ctx))
