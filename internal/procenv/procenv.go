@@ -30,6 +30,9 @@ type Env struct {
 	Environ []string
 	// Self is the argv prefix that re-invokes this wtp.
 	Self []string
+	// SelfExplicit reports whether Self was supplied by an embedder rather than
+	// derived from the running executable.
+	SelfExplicit bool
 	// Args is the full argv of the invocation, including the program name.
 	Args []string
 }

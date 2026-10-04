@@ -89,7 +89,7 @@ func shellInitBash(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return printBashHook(w)
+	return printBashHook(w, scriptSelf(ctx)...)
 }
 
 func shellInitZsh(ctx context.Context, cmd *cli.Command) error {
@@ -105,7 +105,7 @@ func shellInitZsh(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return printZshHook(w)
+	return printZshHook(w, scriptSelf(ctx)...)
 }
 
 func shellInitFish(ctx context.Context, cmd *cli.Command) error {
@@ -121,7 +121,7 @@ func shellInitFish(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	return printFishHook(w)
+	return printFishHook(w, scriptSelf(ctx)...)
 }
 
 // outputCompletion executes wtp completion command and writes output to w

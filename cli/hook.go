@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/urfave/cli/v3"
+
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 )
 
 // newHookCommand creates the hook command definition
@@ -45,21 +48,68 @@ func newHookCommand() *cli.Command {
 
 func hookBash(ctx context.Context, cmd *cli.Command) error {
 	w := stdoutFor(ctx, cmd)
-	return printBashHook(w)
+	return printBashHook(w, scriptSelf(ctx)...)
 }
 
 func hookZsh(ctx context.Context, cmd *cli.Command) error {
 	w := stdoutFor(ctx, cmd)
-	return printZshHook(w)
+	return printZshHook(w, scriptSelf(ctx)...)
 }
 
 func hookFish(ctx context.Context, cmd *cli.Command) error {
 	w := stdoutFor(ctx, cmd)
-	return printFishHook(w)
+	return printFishHook(w, scriptSelf(ctx)...)
 }
 
-func printBashHook(w io.Writer) error {
-	_, err := io.WriteString(w, `# wtp shell hook for bash
+const standaloneInvocation = "command wtp "
+
+func scriptSelf(ctx context.Context) []string {
+	env := procenv.From(ctx)
+	if !env.SelfExplicit {
+		return nil
+	}
+	return env.Self
+}
+
+func posixQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+func fishQuote(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+}
+
+func quoteArgv(argv []string, quote func(string) string) string {
+	quoted := make([]string, len(argv))
+	for i, arg := range argv {
+		quoted[i] = quote(arg)
+	}
+	return strings.Join(quoted, " ")
+}
+
+func withInvocation(script string, self []string, quote func(string) string) string {
+	if len(self) == 0 {
+		return script
+	}
+	return strings.ReplaceAll(script, standaloneInvocation, "command "+quoteArgv(self, quote)+" ")
+}
+
+func printBashHook(w io.Writer, self ...string) error {
+	_, err := io.WriteString(w, withInvocation(bashHookScript, self, posixQuote))
+	return err
+}
+
+func printZshHook(w io.Writer, self ...string) error {
+	_, err := io.WriteString(w, withInvocation(zshHookScript, self, posixQuote))
+	return err
+}
+
+func printFishHook(w io.Writer, self ...string) error {
+	_, err := fmt.Fprintln(w, withInvocation(fishHookScript, self, fishQuote))
+	return err
+}
+
+const bashHookScript = `# wtp shell hook for bash
 wtp() {
     for arg in "$@"; do
         if [[ "$arg" == "--generate-shell-completion" ]]; then
@@ -103,13 +153,9 @@ wtp() {
         return $__wtp_exit
     fi
 }
-`)
+`
 
-	return err
-}
-
-func printZshHook(w io.Writer) error {
-	_, err := io.WriteString(w, `# wtp shell hook for zsh
+const zshHookScript = `# wtp shell hook for zsh
 wtp() {
     for arg in "$@"; do
         if [[ "$arg" == "--generate-shell-completion" ]]; then
@@ -153,13 +199,9 @@ wtp() {
         return $__wtp_exit
     fi
 }
-`)
+`
 
-	return err
-}
-
-func printFishHook(w io.Writer) error {
-	_, err := fmt.Fprintln(w, `# wtp shell hook for fish
+const fishHookScript = `# wtp shell hook for fish
 function wtp
     for arg in $argv
         if test "$arg" = "--generate-shell-completion"
@@ -201,7 +243,4 @@ function wtp
         end
         return $__wtp_exit
     end
-end`)
-
-	return err
-}
+end`

@@ -89,6 +89,7 @@ func (e *Env) resolve(args []string) *procenv.Env {
 		resolved.Self = procenv.DefaultSelf()
 	} else {
 		resolved.Self = slices.Clone(resolved.Self)
+		resolved.SelfExplicit = true
 	}
 	return resolved
 }

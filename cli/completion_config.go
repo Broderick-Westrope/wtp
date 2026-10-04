@@ -39,33 +39,38 @@ func configureCompletionCommand(cmd *cli.Command) {
 			shell = args.First()
 		}
 
-		script := patchCompletionScript(shell, buf.String())
+		script := patchCompletionScript(shell, buf.String(), scriptSelf(ctx)...)
 		_, err := writer.Write([]byte(script))
 		return err
 	}
 }
 
-func patchCompletionScript(shell, script string) string {
+func patchCompletionScript(shell, script string, self ...string) string {
 	switch shell {
 	case "fish":
-		return buildFishCompletionScript()
+		return buildFishCompletionScript(self...)
 	case "bash":
 		return patchBashCompletionScript(script)
 	case "zsh":
-		return patchZshCompletionScript(script)
+		return patchZshCompletionScript(script, self...)
 	default:
 		return script
 	}
 }
 
-func patchZshCompletionScript(script string) string {
+func patchZshCompletionScript(script string, self ...string) string {
 	if strings.Contains(script, "WTP_SHELL_COMPLETION=1") {
 		return script
 	}
 
-	currentReplacement := "opts=(\"${(@f)$(env WTP_SHELL_COMPLETION=1 ${words[@]:0:#words[@]-1} " +
+	invocation := "${words[@]:0:#words[@]-1}"
+	if len(self) > 0 {
+		invocation = quoteArgv(self, posixQuote) + " ${words[2,-2]}"
+	}
+
+	currentReplacement := "opts=(\"${(@f)$(env WTP_SHELL_COMPLETION=1 " + invocation + " " +
 		"${current} --generate-shell-completion)}\")"
-	subcommandReplacement := "opts=(\"${(@f)$(env WTP_SHELL_COMPLETION=1 ${words[@]:0:#words[@]-1} " +
+	subcommandReplacement := "opts=(\"${(@f)$(env WTP_SHELL_COMPLETION=1 " + invocation + " " +
 		"--generate-shell-completion)}\")"
 
 	replacements := []struct {
@@ -89,8 +94,15 @@ func patchZshCompletionScript(script string) string {
 	return script
 }
 
-func buildFishCompletionScript() string {
-	return `# wtp fish shell completion
+func buildFishCompletionScript(self ...string) string {
+	script := fishCompletionScript
+	if len(self) > 0 {
+		script = strings.Replace(script, "command -sq wtp\n", "command -sq "+fishQuote(self[0])+"\n", 1)
+	}
+	return withInvocation(script, self, fishQuote)
+}
+
+const fishCompletionScript = `# wtp fish shell completion
 
 function __fish_wtp_dynamic_complete --description 'wtp dynamic completion helper'
 	set -l tokens (commandline -opc)
@@ -135,7 +147,6 @@ end
 
 complete -c wtp -f -a '(__fish_wtp_dynamic_complete)'
 `
-}
 
 func patchBashCompletionScript(script string) string {
 	if strings.Contains(script, "_wtp_sanitize_completion_list") {
