@@ -1,9 +1,12 @@
+// Command wtp is the standalone wtp binary; the implementation lives in package cli.
 package main
 
 import (
 	"context"
 	"fmt"
 	"os"
+
+	"github.com/Broderick-Westrope/wtp/v3/cli"
 )
 
 // Version information
@@ -23,10 +26,7 @@ var (
 func main() {
 	initVersion()
 
-	app := newApp()
-
-	args := normalizeCompletionArgs(os.Args)
-	if err := app.Run(context.Background(), args); err != nil {
+	if err := cli.Run(context.Background(), os.Args, cli.Env{Version: version}); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
