@@ -57,6 +57,18 @@ func TestMarkFullSync_RemovesLegacyThrottleFiles(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 }
 
+func TestClaimRefresh_SpacesAttemptsPerRepo(t *testing.T) {
+	setupTestEnv(t)
+
+	assert.True(t, maintenance.ClaimRefresh("owner/repo", time.Minute))
+	assert.False(t, maintenance.ClaimRefresh("owner/repo", time.Minute), "a recent attempt blocks another")
+	assert.True(t, maintenance.ClaimRefresh("owner/other", time.Minute), "attempts are tracked per repository")
+
+	maintenance.SetTimeNow(func() time.Time { return time.Now().Add(2 * time.Minute) })
+	t.Cleanup(maintenance.RestoreTimeNow)
+	assert.True(t, maintenance.ClaimRefresh("owner/repo", time.Minute))
+}
+
 func TestAcquireLock_IsExclusive(t *testing.T) {
 	setupTestEnv(t)
 

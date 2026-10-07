@@ -1498,6 +1498,15 @@ func TestListCommand_UncachedBranchStartsBackgroundRefresh(t *testing.T) {
 	assert.Equal(t, 1, *spawns)
 }
 
+func TestListCommand_RefreshAttemptsAreSpacedByTTL(t *testing.T) {
+	spawns := setupListGHTest(t)
+
+	runListForTest(t, defaultListDisplayOptionsForTests())
+	runListForTest(t, defaultListDisplayOptionsForTests())
+
+	assert.Equal(t, 1, *spawns, "a refresh that cached nothing (gh offline) must not be retried on every list")
+}
+
 func TestListCommand_NoSyncSkipsBackgroundRefresh(t *testing.T) {
 	spawns := setupListGHTest(t)
 

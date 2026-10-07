@@ -35,6 +35,10 @@ func lockPath() string    { return filepath.Join(SyncDir(), "lock") }
 func noticesPath() string { return filepath.Join(SyncDir(), "notices") }
 func noticesLock() string { return filepath.Join(SyncDir(), "notices.lock") }
 
+func refreshMarker(repoKey string) string {
+	return filepath.Join(SyncDir(), "refresh", strings.ReplaceAll(repoKey, "/", "--"))
+}
+
 // legacyThrottleDir is where the removed inline maintenance kept per-repo
 // throttle timestamps.
 func legacyThrottleDir() string {
@@ -92,6 +96,26 @@ func MarkFullSync() error {
 	}
 	_ = os.RemoveAll(legacyThrottleDir())
 	return nil
+}
+
+// ClaimRefresh reports whether a background refresh of the repository may
+// start, and records the attempt when it may. Attempts are spaced at least
+// interval apart whatever their outcome: a failed fetch is never cached, so
+// without this every listing while gh is offline or logged out would start
+// another refresh that fails the same way.
+func ClaimRefresh(repoKey string, interval time.Duration) bool {
+	marker := refreshMarker(repoKey)
+	now := timeNow()
+	if info, err := os.Stat(marker); err == nil && now.Sub(info.ModTime()) < interval {
+		return false
+	}
+	if err := xdg.EnsureDir(filepath.Dir(marker)); err != nil {
+		return true
+	}
+	if err := os.WriteFile(marker, nil, syncFileMode); err == nil {
+		_ = os.Chtimes(marker, now, now)
+	}
+	return true
 }
 
 // QueueNotices appends lines for the next interactive command to print. The

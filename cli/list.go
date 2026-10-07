@@ -24,6 +24,7 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 	"github.com/Broderick-Westrope/wtp/v3/internal/github"
+	"github.com/Broderick-Westrope/wtp/v3/internal/maintenance"
 	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
@@ -80,7 +81,8 @@ func newListCommand() *cli.Command {
 		Usage:   "List all worktrees",
 		Description: "Shows all worktrees with their branches, PR/CI status, and HEAD commits.\n\n" +
 			"PR/CI status comes from the local cache, so listing never waits on GitHub. When it is " +
-			"older than cache_ttl, a background 'wtp sync' refreshes it for the next listing.",
+			"older than cache_ttl, a background 'wtp sync' refreshes it for the next listing " +
+			"(at most once per cache_ttl). Set WTP_NO_BACKGROUND_SYNC=1 to disable the refresh.",
 		ShellComplete: completeList,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
@@ -215,7 +217,8 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	if ghAvailable && !opts.Quiet && repoID != nil {
 		globalCfg, _ := config.LoadGlobalConfig()
 		stale := loadPRCIFromCache(displayWorktrees, repoID, archivedBranches, prciData, globalCfg.CacheTTL)
-		if stale && !opts.NoSync && !backgroundSyncDisabled(ctx) {
+		if stale && !opts.NoSync && !backgroundSyncDisabled(ctx) &&
+			maintenance.ClaimRefresh(repoID.StoragePath(), globalCfg.CacheTTL) {
 			listSpawnBackgroundSync(ctx)
 		}
 	} else if !ghAvailable && !opts.Quiet {
