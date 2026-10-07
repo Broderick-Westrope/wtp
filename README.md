@@ -149,6 +149,9 @@ err := wtpcli.Run(ctx, []string{"wtp", "list"}, wtpcli.Env{
 })
 ```
 
+`Self` is used wherever wtp starts itself again: shell hooks, completion,
+background syncs and the launchd agent installed by `wtp sync --install`.
+
 ## Quick Start
 
 ### Automatic Path Generation (Recommended)
@@ -315,8 +318,9 @@ wtp sync --uninstall
 The agent runs at low CPU and I/O priority and exits as soon as it is done; on
 most 15-minute ticks it only checks a timestamp. Worktrees it archives are
 reported by the next wtp command you run. Its log lives at
-`$XDG_DATA_HOME/wtp/sync/sync.log`. Re-run `--install` after moving the wtp
-binary or changing `PATH`; `wtp doctor` warns when the agent is missing, stale
+`$XDG_DATA_HOME/wtp/sync/sync.log`. Installing from a program that embeds wtp
+(such as `anvil wtp sync --install`) schedules that program instead of a wtp
+binary. Re-run `--install` after moving the binary or changing `PATH`; `wtp doctor` warns when the agent is missing, stale
 or points at a binary that no longer exists. On Linux, schedule
 `wtp sync --scheduled` every 15 minutes with cron or a systemd timer.
 
