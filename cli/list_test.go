@@ -16,6 +16,7 @@ import (
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/cache"
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 )
@@ -1504,6 +1505,22 @@ func TestListCommand_NoSyncSkipsBackgroundRefresh(t *testing.T) {
 	opts.NoSync = true
 	runListForTest(t, opts)
 
+	assert.Zero(t, *spawns)
+}
+
+func TestListCommand_EnvDisablesBackgroundRefresh(t *testing.T) {
+	spawns := setupListGHTest(t)
+
+	for _, value := range []string{"1", "true"} {
+		env := &procenv.Env{Dir: "/test/repo", Environ: []string{noBackgroundSyncEnv + "=" + value}}
+		ctx := procenv.WithEnv(context.Background(), env)
+		mockExec := &mockListCommandExecutor{results: []command.Result{{Output: listTestWorktrees}}}
+		var buf bytes.Buffer
+		require.NoError(t, listCommandWithCommandExecutor(
+			ctx, &cli.Command{}, &buf, mockExec, "/test/repo", defaultListDisplayOptionsForTests(),
+		))
+		assert.Contains(t, buf.String(), "feature/auth")
+	}
 	assert.Zero(t, *spawns)
 }
 

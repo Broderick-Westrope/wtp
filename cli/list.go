@@ -215,7 +215,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	if ghAvailable && !opts.Quiet && repoID != nil {
 		globalCfg, _ := config.LoadGlobalConfig()
 		stale := loadPRCIFromCache(displayWorktrees, repoID, archivedBranches, prciData, globalCfg.CacheTTL)
-		if stale && !opts.NoSync {
+		if stale && !opts.NoSync && !backgroundSyncDisabled(ctx) {
 			listSpawnBackgroundSync(ctx)
 		}
 	} else if !ghAvailable && !opts.Quiet {
@@ -282,6 +282,20 @@ func loadPRCIFromCache(
 		prciData[wt.Branch] = prciFromCache(&entry)
 	}
 	return stale
+}
+
+// noBackgroundSyncEnv disables the background refresh `wtp list` starts when
+// cached PR/CI status is stale, for scripts, offline use and tests that must
+// not leave a detached process writing into their directories.
+const noBackgroundSyncEnv = "WTP_NO_BACKGROUND_SYNC"
+
+func backgroundSyncDisabled(ctx context.Context) bool {
+	value := procenv.From(ctx).Getenv(noBackgroundSyncEnv)
+	if value == "" {
+		return false
+	}
+	disabled, err := strconv.ParseBool(value)
+	return err != nil || disabled
 }
 
 // spawnBackgroundSync starts a detached `wtp sync --background` for the

@@ -114,6 +114,8 @@ func (e *TestEnvironment) buildCmdEnv() []string {
 		"XDG_CONFIG_HOME": true,
 		"XDG_CACHE_HOME":  true,
 		"PATH":            true,
+
+		"WTP_NO_BACKGROUND_SYNC": true,
 	}
 
 	var env []string
@@ -131,6 +133,9 @@ func (e *TestEnvironment) buildCmdEnv() []string {
 		"XDG_CONFIG_HOME="+e.xdgConfigHome,
 		"XDG_CACHE_HOME="+e.xdgCacheHome,
 		"PATH="+filteredPath(),
+		// A detached refresh started by `wtp list` outlives the command and
+		// writes into the test's temp dir while cleanup removes it.
+		"WTP_NO_BACKGROUND_SYNC=1",
 	)
 
 	return env
