@@ -214,11 +214,65 @@ func TestInstallSyncAgent_BakesBinaryAndEnvironment(t *testing.T) {
 	assert.Contains(t, out.String(), "every 1h0m0s")
 }
 
-func TestInstallSyncAgent_RejectsEmbeddedSelf(t *testing.T) {
+func TestInstallSyncAgent_BakesEmbedderPrefix(t *testing.T) {
+	isolateSyncDirs(t)
+	_, plistPath := stubAgent(t, "darwin")
+
+	cellar := t.TempDir()
+	host := filepath.Join(cellar, "anvil")
+	require.NoError(t, os.WriteFile(host, []byte("#!/bin/sh\n"), 0o755))
+	binDir := t.TempDir()
+	linked := filepath.Join(binDir, "anvil")
+	require.NoError(t, os.Symlink(host, linked))
+
+	ctx := procenv.WithEnv(t.Context(), &procenv.Env{
+		Self:         []string{host, "wtp"},
+		SelfExplicit: true,
+		Environ:      []string{"PATH=" + binDir + ":/usr/bin"},
+	})
+	require.NoError(t, installSyncAgent(ctx, io.Discard))
+
+	plist, err := launchd.Installed(plistPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(plist),
+		"<string>"+linked+"</string>\n\t\t<string>wtp</string>\n\t\t<string>sync</string>\n\t\t<string>--scheduled</string>",
+		"the PATH symlink is preferred so the agent survives host upgrades")
+	program, err := launchd.ProgramPath(plist)
+	require.NoError(t, err)
+	assert.Equal(t, linked, program)
+}
+
+func TestInstallSyncAgent_ResolvesBareSelfThroughPath(t *testing.T) {
+	isolateSyncDirs(t)
+	_, plistPath := stubAgent(t, "darwin")
+
+	binDir := t.TempDir()
+	host := filepath.Join(binDir, "anvil")
+	require.NoError(t, os.WriteFile(host, []byte("#!/bin/sh\n"), 0o755))
+
+	ctx := procenv.WithEnv(t.Context(), &procenv.Env{
+		Self:         []string{"anvil", "wtp"},
+		SelfExplicit: true,
+		Environ:      []string{"PATH=" + binDir},
+	})
+	require.NoError(t, installSyncAgent(ctx, io.Discard))
+
+	plist, err := launchd.Installed(plistPath)
+	require.NoError(t, err)
+	program, err := launchd.ProgramPath(plist)
+	require.NoError(t, err)
+	assert.Equal(t, host, program)
+}
+
+func TestInstallSyncAgent_RejectsUnresolvableSelf(t *testing.T) {
 	isolateSyncDirs(t)
 	stubAgent(t, "darwin")
-	ctx := procenv.WithEnv(t.Context(), &procenv.Env{Self: []string{"/bin/host", "wtp"}, SelfExplicit: true})
-	assert.ErrorContains(t, installSyncAgent(ctx, io.Discard), "standalone wtp binary")
+	ctx := procenv.WithEnv(t.Context(), &procenv.Env{
+		Self:         []string{"no-such-host", "wtp"},
+		SelfExplicit: true,
+		Environ:      []string{"PATH=" + t.TempDir()},
+	})
+	assert.ErrorContains(t, installSyncAgent(ctx, io.Discard), "no-such-host")
 }
 
 func TestInstallSyncAgent_RequiresMacOS(t *testing.T) {
@@ -234,14 +288,14 @@ func TestCheckSyncAgent(t *testing.T) {
 	assert.Equal(t, 1, checkSyncAgent(&out))
 	assert.Contains(t, out.String(), "wtp sync --install")
 
-	plist, err := launchd.Render("/missing/wtp", "/tmp/log", nil, 0)
+	plist, err := launchd.Render([]string{"/missing/wtp"}, "/tmp/log", nil, 0)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(plistPath, plist, 0o600))
 	out.Reset()
 	assert.Equal(t, 1, checkSyncAgent(&out))
 	assert.Contains(t, out.String(), "missing binary: /missing/wtp")
 
-	plist, err = launchd.Render("/bin/sh", "/tmp/log", nil, 0)
+	plist, err = launchd.Render([]string{"/bin/sh"}, "/tmp/log", nil, 0)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(plistPath, plist, 0o600))
 	require.NoError(t, maintenance.MarkFullSync())

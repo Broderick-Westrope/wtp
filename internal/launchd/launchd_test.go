@@ -18,7 +18,7 @@ var update = flag.Bool("update", false, "rewrite golden files")
 func render(t *testing.T) []byte {
 	t.Helper()
 	plist, err := launchd.Render(
-		"/Users/test/.local/bin/wtp",
+		[]string{"/Users/test/.local/bin/wtp"},
 		"/Users/test/Library/Application Support/wtp/sync/sync.log",
 		[]launchd.EnvVar{
 			{Key: "PATH", Value: "/opt/homebrew/bin:/usr/bin:/bin"},
@@ -47,6 +47,27 @@ func TestProgramPath_RoundTripsRender(t *testing.T) {
 	assert.Equal(t, "/Users/test/.local/bin/wtp", path)
 
 	_, err = launchd.ProgramPath([]byte("<plist/>"))
+	assert.Error(t, err)
+}
+
+func TestRender_EmbeddedProgramPrefix(t *testing.T) {
+	plist, err := launchd.Render([]string{"/opt/homebrew/bin/my host", "wtp"}, "/tmp/sync.log", nil, 0)
+	require.NoError(t, err)
+	assert.Contains(t, string(plist),
+		"<array>\n"+
+			"\t\t<string>/opt/homebrew/bin/my host</string>\n"+
+			"\t\t<string>wtp</string>\n"+
+			"\t\t<string>sync</string>\n"+
+			"\t\t<string>--scheduled</string>\n"+
+			"\t</array>")
+
+	path, err := launchd.ProgramPath(plist)
+	require.NoError(t, err)
+	assert.Equal(t, "/opt/homebrew/bin/my host", path)
+}
+
+func TestRender_RejectsEmptyProgram(t *testing.T) {
+	_, err := launchd.Render(nil, "/tmp/sync.log", nil, 0)
 	assert.Error(t, err)
 }
 

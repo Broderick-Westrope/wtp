@@ -1,5 +1,5 @@
 // Package launchd installs and removes the scheduled `wtp sync` job as a macOS
-// launchd user agent. Everything the job needs (binary path, PATH, XDG
+// launchd user agent. Everything the job needs (wtp invocation, PATH, XDG
 // overrides) is baked into the plist at install time, because launchd starts
 // jobs with neither the user's shell environment nor a working directory.
 package launchd
@@ -115,7 +115,9 @@ var plistTemplate = template.Must(template.New("plist").Funcs(template.FuncMap{
 	<string>{{xml .Label}}</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>{{xml .BinaryPath}}</string>
+{{- range .Program}}
+		<string>{{xml .}}</string>
+{{- end}}
 		<string>sync</string>
 		<string>--scheduled</string>
 	</array>
@@ -152,23 +154,28 @@ type EnvVar struct {
 
 type plistData struct {
 	Label         string
-	BinaryPath    string
+	Program       []string
 	Env           []EnvVar
 	StartInterval int
 	LogPath       string
 }
 
-// Render produces the plist for the sync agent. binaryPath and logPath must
-// be absolute. env is written in the order given. tickMinutes <= 0 falls back
-// to DefaultTickMinutes.
-func Render(binaryPath, logPath string, env []EnvVar, tickMinutes int) ([]byte, error) {
+// Render produces the plist for the sync agent. program is the argv prefix
+// that invokes wtp: a standalone binary, or an embedding host followed by the
+// arguments that reach its wtp, such as ["/opt/homebrew/bin/anvil", "wtp"].
+// program[0] and logPath must be absolute. env is written in the order given.
+// tickMinutes <= 0 falls back to DefaultTickMinutes.
+func Render(program []string, logPath string, env []EnvVar, tickMinutes int) ([]byte, error) {
+	if len(program) == 0 {
+		return nil, errors.New("rendering plist: empty program")
+	}
 	if tickMinutes <= 0 {
 		tickMinutes = DefaultTickMinutes
 	}
 	var buf bytes.Buffer
 	err := plistTemplate.Execute(&buf, plistData{
 		Label:         Label,
-		BinaryPath:    binaryPath,
+		Program:       program,
 		Env:           env,
 		StartInterval: tickMinutes * 60, //nolint:mnd // minutes to seconds
 		LogPath:       logPath,

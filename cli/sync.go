@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -323,23 +324,39 @@ func uninstallSyncAgent(w io.Writer) error {
 	return err
 }
 
-// agentProgram returns the absolute path the agent should execute. An
-// embedder's self prefix cannot be baked into a plist, so only a standalone
-// wtp binary can be scheduled. When the binary is also reachable through PATH
-// (for example a Homebrew symlink), the PATH entry is preferred because it
-// survives upgrades that move the real file.
-func agentProgram(env *procenv.Env) (string, error) {
-	if env.SelfExplicit || len(env.Self) != 1 {
-		return "", stderrors.New("the background agent can only be installed from the standalone wtp binary")
+// agentProgram returns the argv prefix the agent should execute: the
+// invocation's self prefix with its executable made absolute. That is the
+// standalone wtp binary, or an embedding host followed by the arguments that
+// reach its wtp. When the executable is also reachable through PATH under the
+// same name (for example a Homebrew symlink), the PATH entry is preferred
+// because it survives upgrades that move the real file.
+func agentProgram(env *procenv.Env) ([]string, error) {
+	if len(env.Self) == 0 || env.Self[0] == "" {
+		return nil, stderrors.New("cannot determine how to re-run wtp for the background agent")
 	}
-	exe, err := filepath.Abs(env.Self[0])
+	exe, err := resolveExecutable(env.Self[0], env.Getenv("PATH"))
 	if err != nil {
-		return "", fmt.Errorf("resolving wtp binary: %w", err)
+		return nil, err
 	}
-	if onPath, lookErr := lookPathIn("wtp", env.Getenv("PATH")); lookErr == nil && sameFile(onPath, exe) {
-		return onPath, nil
+	if onPath, lookErr := lookPathIn(filepath.Base(exe), env.Getenv("PATH")); lookErr == nil && sameFile(onPath, exe) {
+		exe = onPath
 	}
-	return exe, nil
+	return append([]string{exe}, env.Self[1:]...), nil
+}
+
+func resolveExecutable(name, pathEnv string) (string, error) {
+	if !strings.ContainsRune(name, filepath.Separator) {
+		found, err := lookPathIn(name, pathEnv)
+		if err != nil {
+			return "", fmt.Errorf("resolving %s for the background agent: %w", name, err)
+		}
+		return found, nil
+	}
+	abs, err := filepath.Abs(name)
+	if err != nil {
+		return "", fmt.Errorf("resolving %s for the background agent: %w", name, err)
+	}
+	return abs, nil
 }
 
 func lookPathIn(name, pathEnv string) (string, error) {
