@@ -80,7 +80,7 @@ exact match. No more terminal tab confusion.
   - Zsh
   - Fish
 - `gh` CLI _(optional)_ — enables PR/CI status columns in `wtp list` and
-  powers auto-archive of merged branches
+  powers `wtp sync`, which auto-archives merged branches
 - `fzf` _(optional)_ — enables interactive fuzzy worktree picker for `wtp cd`
   (no-arg invocations and partial-match fallback)
 
@@ -212,7 +212,7 @@ wtp list
 # Show archived worktrees too
 wtp list --all
 
-# Skip gh calls and auto-archive (faster, offline-friendly)
+# Don't start a background refresh of stale PR/CI status
 wtp list --no-sync
 
 # Remove worktree and branch (default behavior)
@@ -227,9 +227,12 @@ wtp remove -k feature/auth                         # Same as --keep-branch (alia
 # Archive / unarchive worktrees (hide from list without removing)
 wtp archive feature/auth                           # Hides from wtp list
 wtp unarchive feature/auth                         # Makes visible again
-# Note: merged PRs are auto-archived when gh CLI is available
 
-# Diagnose common wtp issues (v2 worktrees, orphaned state, gh status)
+# Check PRs on GitHub: auto-archive merged/closed worktrees, refresh PR/CI status
+wtp sync                                           # Current repository
+wtp sync --all                                     # Every repository with wtp worktrees
+
+# Diagnose common wtp issues (v2 worktrees, orphaned state, gh status, sync agent)
 wtp doctor
 
 # Create a .wtp.yml config file with hook examples
@@ -293,6 +296,30 @@ Branch names with slashes are preserved as directory structure, automatically
 organising worktrees by type/category — while keeping your project directory
 clean.
 
+#### Background Sync
+
+No wtp command waits on GitHub. `wtp list` shows PR/CI status from a local
+cache, and when that cache is older than `cache_ttl` it starts a detached
+`wtp sync` for the repository so the next listing is fresh. Merged and closed
+PRs are auto-archived by `wtp sync` only, skipping worktrees with uncommitted
+changes or a process (such as a shell) inside them.
+
+To keep every repository current without running anything by hand, install the
+background agent (macOS, via launchd):
+
+```bash
+wtp sync --install     # syncs all repositories every maintenance_interval (default 1h)
+wtp sync --uninstall
+```
+
+The agent runs at low CPU and I/O priority and exits as soon as it is done; on
+most 15-minute ticks it only checks a timestamp. Worktrees it archives are
+reported by the next wtp command you run. Its log lives at
+`$XDG_DATA_HOME/wtp/sync/sync.log`. Re-run `--install` after moving the wtp
+binary or changing `PATH`; `wtp doctor` warns when the agent is missing, stale
+or points at a binary that no longer exists. On Linux, schedule
+`wtp sync --scheduled` every 15 minutes with cron or a systemd timer.
+
 > **Migrating from v2?** Run `wtp doctor` to detect any old-style worktrees
 > stored inside the repository and get instructions for cleaning them up.
 
@@ -303,8 +330,15 @@ clean.
 wtp reads an optional global config from `$XDG_CONFIG_HOME/wtp/config.yml`:
 
 ```yaml
-# How long PR/CI status is cached before re-fetching (default: 60s)
+# How old cached PR/CI status may get before `wtp list` starts a background
+# refresh (default: 60s)
 cache_ttl: 60s # accepts durations like "30s", "5m" or integer seconds
+
+# How often the background agent syncs every repository (default: 1h)
+maintenance_interval: 1h
+
+# How long archived worktrees stay recoverable with `wtp unarchive` (default: 240h)
+archive_retention: 240h
 ```
 
 ### Project Config

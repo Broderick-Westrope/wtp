@@ -12,6 +12,8 @@ This document describes the current implementation shape of `wtp`.
   - `internal/git`: git repository/worktree operations and branch resolution
   - `internal/config`: `.wtp.yml` schema, defaults, validation, path resolution
   - `internal/hooks`: post-create hook execution
+  - `internal/maintenance`: GitHub sync (auto-archive, PR/CI cache refresh), repo discovery, notices
+  - `internal/launchd`: macOS launchd agent for scheduled `wtp sync`
   - `internal/errors`: user-facing error helpers
   - `internal/io`, `internal/testutil`: output and test helpers
 
@@ -26,7 +28,32 @@ This document describes the current implementation shape of `wtp`.
 - `cd`
 - `hook`
 - `shell-init`
+- `archive`, `unarchive`
+- `doctor`
+- `sync`
 - completion command provided by `urfave/cli`
+
+## GitHub Sync
+
+Only `wtp sync` talks to GitHub. Before every other command, `runMaintenance`
+prints notices queued by background syncs and reaps expired archive entries;
+both are local file reads and run no subprocesses.
+
+`maintenance.Runner.Sync` checks each worktree's PR through `gh` with bounded
+concurrency, then sequentially auto-archives clean, unused worktrees whose PR
+is merged or closed and writes the PR/CI cache for the rest. It runs every
+subprocess in the repository's main worktree, so it behaves the same from a
+shell as from launchd.
+
+- `wtp list` reads that cache only. When an entry is missing or older than
+  `cache_ttl` it spawns a detached `wtp sync --background` for the repository.
+- `wtp sync --all` discovers repositories by reading the `.git` files of
+  worktrees under the storage root.
+- The launchd agent runs `wtp sync --scheduled` every 15 minutes; it syncs all
+  repositories only when `maintenance_interval` has elapsed since the last full
+  sync. A non-blocking lock makes overlapping syncs skip.
+- Background syncs queue their auto-archive messages in
+  `$XDG_DATA_HOME/wtp/sync/notices` for the next interactive command.
 
 ## Command Execution Model
 
