@@ -19,6 +19,12 @@ func newApp() *cli.Command {
 			switch cmd.Args().First() {
 			case "shell-init", "hook", completionCommandName:
 				return ctx, nil
+			case syncCommandName:
+				// Background syncs have no terminal: draining notices there
+				// would discard them before the user ever saw them.
+				if isBackgroundSync(cmd.Args().Slice()) {
+					return ctx, nil
+				}
 			}
 			_ = runMaintenance(ctx, stderrFor(ctx))
 			return ctx, nil
@@ -42,6 +48,7 @@ func newApp() *cli.Command {
 			newArchiveCommand(),
 			newUnarchiveCommand(),
 			newDoctorCommand(),
+			newSyncCommand(),
 		},
 	}
 }

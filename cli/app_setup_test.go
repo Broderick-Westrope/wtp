@@ -3,13 +3,38 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
+	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/cli/v3"
 )
 
-func TestMain(t *testing.T) {
+// TestMain keeps tests away from the user's real wtp data and from starting
+// real background syncs: under test the self-invocation argv is the test
+// binary, and a sync against real data would archive real worktrees.
+func TestMain(m *testing.M) {
+	listSpawnBackgroundSync = func(context.Context) {}
+
+	root, err := os.MkdirTemp("", "wtp-cli-test-")
+	if err != nil {
+		panic(err)
+	}
+	for _, key := range []string{"XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME"} {
+		if err := os.Setenv(key, filepath.Join(root, key)); err != nil {
+			panic(err)
+		}
+	}
+	axdg.Reload()
+
+	code := m.Run()
+	_ = os.RemoveAll(root)
+	os.Exit(code)
+}
+
+func TestAppSetup(t *testing.T) {
 	// Test main function doesn't crash
 	// This is tricky to test directly, so we test the app setup instead
 	t.Run("app setup", func(t *testing.T) {

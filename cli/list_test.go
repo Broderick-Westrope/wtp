@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/Broderick-Westrope/wtp/v3/internal/cache"
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
-	"github.com/Broderick-Westrope/wtp/v3/internal/github"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 )
@@ -1406,68 +1406,25 @@ branch refs/heads/main
 	})
 }
 
-func TestListCommand_NoSync_SkipsGHCalls(t *testing.T) {
-	ghCallCount := 0
-
-	oldIsGH := listIsGHAvailable
-	listIsGHAvailable = func() bool { return true }
-	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
-
-	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ context.Context, _, _ string) (*github.PRInfo, error) {
-		ghCallCount++
-		return nil, nil
-	}
-	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
-
-	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ context.Context, _, _ string) (*github.CIStatus, error) {
-		ghCallCount++
-		return nil, nil
-	}
-	t.Cleanup(func() { listGetCIStatus = oldGetCI })
-
-	mockOutput := `worktree /test/repo
+const listTestWorktrees = `worktree /test/repo
 HEAD abc123
 branch refs/heads/main
 
-worktree /test/repo/.worktrees/feature/test
+worktree /test/repo/.worktrees/feature/auth
 HEAD def456
-branch refs/heads/feature/test
+branch refs/heads/feature/auth
 
 `
 
-	mockExec := &mockListCommandExecutor{
-		results: []command.Result{
-			{Output: mockOutput, Error: nil},
-		},
-	}
-
-	var buf bytes.Buffer
-	cmd := &cli.Command{}
-
-	opts := defaultListDisplayOptionsForTests()
-	opts.NoSync = true
-	err := listCommandWithCommandExecutor(
-		context.Background(),
-		cmd, &buf, mockExec, "/test/repo",
-		opts,
-	)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 0, ghCallCount, "gh calls should be skipped with --no-sync")
-}
-
-// TestListCommand_DoesNotAutoArchive verifies that wtp list no longer
-// auto-archives merged PR branches — that responsibility moved to the
-// maintenance system. The merged branch stays visible and state is untouched.
-func TestListCommand_DoesNotAutoArchive(t *testing.T) {
-	dataDir := t.TempDir()
-	cacheDir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dataDir)
-
-	t.Setenv("XDG_CACHE_HOME", cacheDir)
+// setupListGHTest isolates state and cache, pretends gh is installed and the
+// repo has a GitHub origin, and counts background refreshes the list starts.
+func setupListGHTest(t *testing.T) *int {
+	t.Helper()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	axdg.Reload()
+	t.Cleanup(axdg.Reload)
 
 	oldIsGH := listIsGHAvailable
 	listIsGHAvailable = func() bool { return true }
@@ -1479,56 +1436,100 @@ func TestListCommand_DoesNotAutoArchive(t *testing.T) {
 	}
 	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
 
-	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ context.Context, _, branch string) (*github.PRInfo, error) {
-		if branch == "feature/merged" {
-			return &github.PRInfo{Number: 42, State: "MERGED", Title: "Merged PR"}, nil
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
+	spawns := 0
+	oldSpawn := listSpawnBackgroundSync
+	listSpawnBackgroundSync = func(context.Context) { spawns++ }
+	t.Cleanup(func() { listSpawnBackgroundSync = oldSpawn })
+	return &spawns
+}
 
-	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ context.Context, _, _ string) (*github.CIStatus, error) {
-		return nil, nil
-	}
-	t.Cleanup(func() { listGetCIStatus = oldGetCI })
-
-	mockOutput := `worktree /test/repo
-HEAD abc123
-branch refs/heads/main
-
-worktree /test/repo/.worktrees/feature/merged
-HEAD def456
-branch refs/heads/feature/merged
-
-`
-
+func runListForTest(t *testing.T, opts listDisplayOptions) string {
+	t.Helper()
 	mockExec := &mockListCommandExecutor{
-		results: []command.Result{
-			{Output: mockOutput, Error: nil},
-		},
+		results: []command.Result{{Output: listTestWorktrees}},
 	}
-
 	var buf bytes.Buffer
-	cmd := &cli.Command{}
+	err := listCommandWithCommandExecutor(context.Background(), &cli.Command{}, &buf, mockExec, "/test/repo", opts)
+	require.NoError(t, err)
+	return buf.String()
+}
 
-	err := listCommandWithCommandExecutor(
-		context.Background(),
-		cmd, &buf, mockExec, "/test/repo",
-		defaultListDisplayOptionsForTests(),
-	)
-
-	assert.NoError(t, err)
-	output := buf.String()
-
-	// List no longer auto-archives — the merged branch remains visible.
-	assert.Contains(t, output, "feature/merged", "merged branch should still appear in table")
-
-	// State must be untouched — auto-archive is the maintenance system's job.
+func seedListCache(t *testing.T, entry *cache.WorktreeCache) {
+	t.Helper()
 	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
-	stateStore := state.NewStore()
-	assert.False(t, stateStore.IsArchived(repoID.StateKey("feature/merged")))
+	require.NoError(t, cache.NewStore().SetBatch(map[string]cache.WorktreeCache{
+		repoID.StateKey("feature/auth"): *entry,
+	}))
+}
+
+func TestListCommand_ShowsCachedPRCIWithoutRefreshWhenFresh(t *testing.T) {
+	spawns := setupListGHTest(t)
+	seedListCache(t, &cache.WorktreeCache{PRNumber: 42, PRState: "OPEN", CIStatus: "✓ CI passing"})
+
+	output := runListForTest(t, defaultListDisplayOptionsForTests())
+
+	assert.Contains(t, output, " PR ")
+	assert.Contains(t, output, " CI ")
+	assert.Contains(t, output, "#42 Ready")
+	assert.Contains(t, output, "✓ CI passing")
+	assert.Zero(t, *spawns, "fresh cache needs no refresh")
+}
+
+func TestListCommand_StaleCacheStartsBackgroundRefresh(t *testing.T) {
+	spawns := setupListGHTest(t)
+	seedListCache(t, &cache.WorktreeCache{
+		PRNumber: 42, PRState: "OPEN", CIStatus: "● 1 pending",
+		UpdatedAt: time.Now().Add(-time.Hour),
+	})
+
+	output := runListForTest(t, defaultListDisplayOptionsForTests())
+
+	assert.Contains(t, output, "#42 Ready", "stale data is still shown rather than waited on")
+	assert.Equal(t, 1, *spawns)
+}
+
+func TestListCommand_UncachedBranchStartsBackgroundRefresh(t *testing.T) {
+	spawns := setupListGHTest(t)
+
+	output := runListForTest(t, defaultListDisplayOptionsForTests())
+
+	assert.Contains(t, output, "feature/auth")
+	assert.Equal(t, 1, *spawns)
+}
+
+func TestListCommand_NoSyncSkipsBackgroundRefresh(t *testing.T) {
+	spawns := setupListGHTest(t)
+
+	opts := defaultListDisplayOptionsForTests()
+	opts.NoSync = true
+	runListForTest(t, opts)
+
+	assert.Zero(t, *spawns)
+}
+
+func TestListCommand_QuietSkipsPRCI(t *testing.T) {
+	spawns := setupListGHTest(t)
+
+	opts := defaultListDisplayOptionsForTests()
+	opts.Quiet = true
+	output := runListForTest(t, opts)
+
+	assert.Equal(t, "@\nfeature/auth\n", output)
+	assert.Zero(t, *spawns)
+}
+
+// TestListCommand_DoesNotAutoArchive verifies that wtp list never archives,
+// even when the cache says a PR merged — that is `wtp sync`'s job.
+func TestListCommand_DoesNotAutoArchive(t *testing.T) {
+	setupListGHTest(t)
+	seedListCache(t, &cache.WorktreeCache{PRNumber: 42, PRState: "MERGED", CIStatus: "-"})
+
+	output := runListForTest(t, defaultListDisplayOptionsForTests())
+
+	assert.Contains(t, output, "feature/auth")
+	assert.Contains(t, output, "#42 Merged")
+	repoID := remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
+	assert.False(t, state.NewStore().IsArchived(repoID.StateKey("feature/auth")))
 }
 
 func TestListCommand_DetachedHeadWithMarker(t *testing.T) {
@@ -1567,123 +1568,4 @@ detached
 	// Detached HEAD shows with (detached) marker, not (detached HEAD)
 	assert.Contains(t, output, "(detached)")
 	assert.NotContains(t, output, "(detached HEAD)")
-}
-
-func TestListCommand_QuietNoSyncSideEffectFree(t *testing.T) {
-	ghCallCount := 0
-
-	oldIsGH := listIsGHAvailable
-	listIsGHAvailable = func() bool { return true }
-	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
-
-	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ context.Context, _, _ string) (*github.PRInfo, error) {
-		ghCallCount++
-		return nil, nil
-	}
-	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
-
-	mockOutput := `worktree /test/repo
-HEAD abc123
-branch refs/heads/main
-
-worktree /test/repo/.worktrees/feature/test
-HEAD def456
-branch refs/heads/feature/test
-
-`
-
-	mockExec := &mockListCommandExecutor{
-		results: []command.Result{
-			{Output: mockOutput, Error: nil},
-		},
-	}
-
-	var buf bytes.Buffer
-	cmd := &cli.Command{}
-
-	opts := defaultListDisplayOptionsForTests()
-	opts.Quiet = true
-	opts.NoSync = true
-	err := listCommandWithCommandExecutor(
-		context.Background(),
-		cmd, &buf, mockExec, "/test/repo",
-		opts,
-	)
-
-	assert.NoError(t, err)
-	assert.Equal(t, 0, ghCallCount, "quiet+no-sync should make no gh calls")
-	output := buf.String()
-	// Quiet mode outputs branch names
-	assert.Equal(t, "@\nfeature/test\n", output)
-}
-
-func TestListCommand_WithGHColumns(t *testing.T) {
-	dataDir := t.TempDir()
-	cacheDir := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", dataDir)
-
-	t.Setenv("XDG_CACHE_HOME", cacheDir)
-	axdg.Reload()
-
-	oldIsGH := listIsGHAvailable
-	listIsGHAvailable = func() bool { return true }
-	t.Cleanup(func() { listIsGHAvailable = oldIsGH })
-
-	oldGetRemote := listGetRemoteURL
-	listGetRemoteURL = func(_ context.Context, _ string) (string, error) {
-		return "https://github.com/owner/repo.git", nil
-	}
-	t.Cleanup(func() { listGetRemoteURL = oldGetRemote })
-
-	oldGetPR := listGetPRForBranch
-	listGetPRForBranch = func(_ context.Context, _, branch string) (*github.PRInfo, error) {
-		if branch == "feature/auth" {
-			return &github.PRInfo{Number: 42, State: "OPEN"}, nil
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { listGetPRForBranch = oldGetPR })
-
-	oldGetCI := listGetCIStatus
-	listGetCIStatus = func(_ context.Context, _, branch string) (*github.CIStatus, error) {
-		if branch == "feature/auth" {
-			return &github.CIStatus{State: "passing", Total: 3, Passing: 3}, nil
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { listGetCIStatus = oldGetCI })
-
-	mockOutput := `worktree /test/repo
-HEAD abc123
-branch refs/heads/main
-
-worktree /test/repo/.worktrees/feature/auth
-HEAD def456
-branch refs/heads/feature/auth
-
-`
-
-	mockExec := &mockListCommandExecutor{
-		results: []command.Result{
-			{Output: mockOutput, Error: nil},
-		},
-	}
-
-	var buf bytes.Buffer
-	cmd := &cli.Command{}
-
-	err := listCommandWithCommandExecutor(
-		context.Background(),
-		cmd, &buf, mockExec, "/test/repo",
-		defaultListDisplayOptionsForTests(),
-	)
-
-	assert.NoError(t, err)
-	output := buf.String()
-
-	// With gh: PR and CI columns present
-	assert.Contains(t, output, " PR ")
-	assert.Contains(t, output, " CI ")
-	assert.Contains(t, output, "#42")
 }

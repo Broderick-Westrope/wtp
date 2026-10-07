@@ -1,51 +1,29 @@
 package cli
 
 import (
-	"context"
+	"bytes"
 	"testing"
 
+	axdg "github.com/adrg/xdg"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/maintenance"
 )
 
-func TestRunMaintenance_SilentlySkipsNonGitDir(t *testing.T) {
-	dir := t.TempDir()
+func TestRunMaintenance_PrintsQueuedNoticesOnce(t *testing.T) {
+	t.Cleanup(axdg.Reload)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	axdg.Reload()
 
-	origGetwd := maintGetwd
-	maintGetwd = func(context.Context) (string, error) { return dir, nil }
-	t.Cleanup(func() { maintGetwd = origGetwd })
+	require.NoError(t, maintenance.QueueNotices([]string{"Auto-archived feat in owner/repo (PR #1 MERGED)"}))
 
-	origNewGitRepo := maintNewGitRepo
-	maintNewGitRepo = newRepository // will fail on tmpdir
-	t.Cleanup(func() { maintNewGitRepo = origNewGitRepo })
+	var buf bytes.Buffer
+	require.NoError(t, runMaintenance(t.Context(), &buf))
+	assert.Equal(t, "Auto-archived feat in owner/repo (PR #1 MERGED)\n", buf.String())
 
-	var buf nopWriter
-	err := runMaintenance(t.Context(), &buf)
-	assert.NoError(t, err)
+	buf.Reset()
+	require.NoError(t, runMaintenance(t.Context(), &buf))
+	assert.Empty(t, buf.String())
 }
-
-func TestRunMaintenance_SilentlySkipsNoRemote(t *testing.T) {
-	// Create a bare git repo with no remote
-	dir := t.TempDir()
-
-	origGetwd := maintGetwd
-	maintGetwd = func(context.Context) (string, error) { return dir, nil }
-	t.Cleanup(func() { maintGetwd = origGetwd })
-
-	origNewGitRepo := maintNewGitRepo
-	maintNewGitRepo = func(_ context.Context, _ string) (*git.Repository, error) {
-		// Return a repo backed by a path that has no origin remote
-		return git.NewRepository(dir, nil)
-	}
-	t.Cleanup(func() { maintNewGitRepo = origNewGitRepo })
-
-	var buf nopWriter
-	err := runMaintenance(t.Context(), &buf)
-	assert.NoError(t, err)
-}
-
-// nopWriter discards all writes.
-type nopWriter struct{}
-
-func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }

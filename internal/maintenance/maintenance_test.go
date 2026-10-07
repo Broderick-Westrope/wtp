@@ -3,9 +3,9 @@ package maintenance_test
 import (
 	"bytes"
 	"context"
-	"os"
-	"path/filepath"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,110 +13,83 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Broderick-Westrope/wtp/v3/internal/cache"
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
-	"github.com/Broderick-Westrope/wtp/v3/internal/config"
 	"github.com/Broderick-Westrope/wtp/v3/internal/github"
 	"github.com/Broderick-Westrope/wtp/v3/internal/maintenance"
+	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 )
 
+const retention = 240 * time.Hour
+
 func setupTestEnv(t *testing.T) *state.Store {
 	t.Helper()
 
-	dir := t.TempDir()
 	t.Cleanup(axdg.Reload)
-	t.Setenv("XDG_DATA_HOME", dir)
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	axdg.Reload()
 
 	return state.NewStore()
-}
-
-func defaultCfg() config.GlobalConfig {
-	return config.GlobalConfig{
-		CacheTTL:            60 * time.Second,
-		ArchiveRetention:    240 * time.Hour,
-		MaintenanceInterval: 10 * time.Minute,
-	}
 }
 
 func repoID() *remote.RepoIdentifier {
 	return &remote.RepoIdentifier{Owner: "owner", Repo: "repo"}
 }
 
-// ─── RunCheap tests ─────────────────────────────────────────────────────────
+// ─── Reap tests ─────────────────────────────────────────────────────────────
 
-func TestRunCheap_ReapsExpiredEntries(t *testing.T) {
+func TestReap_ReapsExpiredEntriesAcrossRepos(t *testing.T) {
 	store := setupTestEnv(t)
 	id := repoID()
-	cfg := defaultCfg()
-
-	expired := time.Now().Add(-cfg.ArchiveRetention - time.Hour)
+	otherID := remote.RepoIdentifier{Owner: "other", Repo: "other-repo"}
+	expired := time.Now().Add(-retention - time.Hour)
 
 	require.NoError(t, store.Save(state.State{
 		Worktrees: map[string]state.WorktreeState{
-			id.StateKey("old-branch"): {
-				Archived:   true,
-				ArchivedAt: expired,
-				CommitSHA:  "abc123",
-				Branch:     "old-branch",
-			},
+			id.StateKey("old"):        {Archived: true, ArchivedAt: expired, CommitSHA: "abc", Branch: "old"},
+			otherID.StateKey("older"): {Archived: true, ArchivedAt: expired, CommitSHA: "def", Branch: "older"},
 		},
 	}))
 
 	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunCheap())
+	require.NoError(t, maintenance.Reap(store, retention, &buf))
 
 	st, err := store.Load()
 	require.NoError(t, err)
 	assert.Empty(t, st.Worktrees)
 }
 
-func TestRunCheap_KeepsFreshEntries(t *testing.T) {
+func TestReap_KeepsFreshAndUnarchivedEntries(t *testing.T) {
 	store := setupTestEnv(t)
 	id := repoID()
-	cfg := defaultCfg()
-
-	fresh := time.Now().Add(-time.Hour)
 
 	require.NoError(t, store.Save(state.State{
 		Worktrees: map[string]state.WorktreeState{
-			id.StateKey("fresh-branch"): {
-				Archived:   true,
-				ArchivedAt: fresh,
-				CommitSHA:  "abc123",
-				Branch:     "fresh-branch",
-			},
+			id.StateKey("fresh"):      {Archived: true, ArchivedAt: time.Now().Add(-time.Hour), CommitSHA: "abc"},
+			id.StateKey("suppressed"): {SuppressAutoArchive: true},
 		},
 	}))
 
 	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunCheap())
+	require.NoError(t, maintenance.Reap(store, retention, &buf))
 
 	st, err := store.Load()
 	require.NoError(t, err)
-	assert.Len(t, st.Worktrees, 1)
+	assert.Len(t, st.Worktrees, 2)
 }
 
-func TestRunCheap_ReapsLegacyEntries(t *testing.T) {
+func TestReap_ReapsLegacyEntries(t *testing.T) {
 	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
 
 	require.NoError(t, store.Save(state.State{
-		Worktrees: map[string]state.WorktreeState{
-			id.StateKey("legacy"): {
-				Archived: true,
-				// No CommitSHA, ArchivedAt, etc. — legacy entry
-			},
-		},
+		Worktrees: map[string]state.WorktreeState{repoID().StateKey("legacy"): {Archived: true}},
 	}))
 
 	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunCheap())
+	require.NoError(t, maintenance.Reap(store, retention, &buf))
 
 	st, err := store.Load()
 	require.NoError(t, err)
@@ -124,107 +97,59 @@ func TestRunCheap_ReapsLegacyEntries(t *testing.T) {
 	assert.Contains(t, buf.String(), "Cleaned up 1 legacy archive entries")
 }
 
-func TestRunCheap_UsesCorrectExpirationPrecedence(t *testing.T) {
+func TestReap_UsesPRClosedAtBeforeArchivedAt(t *testing.T) {
 	store := setupTestEnv(t)
 	id := repoID()
-	cfg := defaultCfg()
-
 	now := time.Now()
-	// PRClosedAt is expired, ArchivedAt is fresh — should use PRClosedAt (expired)
-	expiredPR := now.Add(-cfg.ArchiveRetention - time.Hour)
-	freshArchive := now.Add(-time.Hour)
-
-	// ArchivedAt is expired, no PRClosedAt — should use ArchivedAt
-	expiredArchive := now.Add(-cfg.ArchiveRetention - 2*time.Hour)
 
 	require.NoError(t, store.Save(state.State{
 		Worktrees: map[string]state.WorktreeState{
 			id.StateKey("pr-expired"): {
 				Archived:   true,
-				ArchivedAt: freshArchive,
-				PRClosedAt: expiredPR,
+				ArchivedAt: now.Add(-time.Hour),
+				PRClosedAt: now.Add(-retention - time.Hour),
 				CommitSHA:  "abc",
-				Branch:     "pr-expired",
-			},
-			id.StateKey("archive-expired"): {
-				Archived:   true,
-				ArchivedAt: expiredArchive,
-				CommitSHA:  "def",
-				Branch:     "archive-expired",
 			},
 		},
 	}))
 
 	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunCheap())
+	require.NoError(t, maintenance.Reap(store, retention, &buf))
 
 	st, err := store.Load()
 	require.NoError(t, err)
 	assert.Empty(t, st.Worktrees)
 }
 
-func TestRunCheap_OnlyAffectsCurrentRepo(t *testing.T) {
-	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
+// ─── Sync tests ─────────────────────────────────────────────────────────────
 
-	otherID := remote.RepoIdentifier{Owner: "other", Repo: "other-repo"}
-	expired := time.Now().Add(-cfg.ArchiveRetention - time.Hour)
-
-	require.NoError(t, store.Save(state.State{
-		Worktrees: map[string]state.WorktreeState{
-			id.StateKey("my-branch"): {
-				Archived:   true,
-				ArchivedAt: expired,
-				CommitSHA:  "abc",
-				Branch:     "my-branch",
-			},
-			otherID.StateKey("other-branch"): {
-				Archived:   true,
-				ArchivedAt: expired,
-				CommitSHA:  "def",
-				Branch:     "other-branch",
-			},
-		},
-	}))
-
-	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunCheap())
-
-	st, err := store.Load()
-	require.NoError(t, err)
-	assert.Len(t, st.Worktrees, 1)
-	_, ok := st.Worktrees[otherID.StateKey("other-branch")]
-	assert.True(t, ok, "other repo's entry should be untouched")
+// recordingExecutor returns worktree list output for `git worktree list` and
+// records every other command.
+type recordingExecutor struct {
+	mu       sync.Mutex
+	output   string
+	commands []command.Command
 }
 
-// ─── RunExpensive tests ─────────────────────────────────────────────────────
-
-// mockExecutor implements command.Executor for testing.
-type mockExecutor struct {
-	output string
-	err    error
-}
-
-func (m *mockExecutor) Execute(_ []command.Command) (*command.ExecutionResult, error) {
-	if m.err != nil {
-		return nil, m.err
+func (m *recordingExecutor) Execute(cmds []command.Command) (*command.ExecutionResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	results := make([]command.Result, 0, len(cmds))
+	for _, c := range cmds {
+		m.commands = append(m.commands, c)
+		out := ""
+		if len(c.Args) > 1 && c.Args[0] == "worktree" && c.Args[1] == "list" {
+			out = m.output
+		}
+		results = append(results, command.Result{Command: c, Output: out})
 	}
-	return &command.ExecutionResult{
-		Results: []command.Result{
-			{Output: m.output},
-		},
-	}, nil
+	return &command.ExecutionResult{Results: results}, nil
 }
 
-// porcelain builds a git worktree list --porcelain output for testing.
 func porcelain(entries ...string) string {
 	return strings.Join(entries, "\n")
 }
 
-// wtEntry builds a single worktree porcelain block.
 func wtEntry(path, head, branch string) string {
 	s := "worktree " + path + "\nHEAD " + head + "\n"
 	if branch != "" {
@@ -235,261 +160,195 @@ func wtEntry(path, head, branch string) string {
 	return s
 }
 
-func TestRunExpensive_SkipsWhenThrottled(t *testing.T) {
-	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
-
-	// Create fresh throttle file
-	tDir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "wtp", "maintenance")
-	require.NoError(t, os.MkdirAll(tDir, 0o755))
-	tFile := filepath.Join(tDir, "owner--repo")
-	require.NoError(t, os.WriteFile(tFile, nil, 0o600))
-
-	prCalled := false
-	maintenance.SetGetPRForBranch(func(_ context.Context, _ string) (*github.PRInfo, error) {
-		prCalled = true
-		return nil, nil
-	})
-	t.Cleanup(maintenance.RestoreGetPRForBranch)
-
-	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunExpensive(context.Background()))
-	assert.False(t, prCalled, "should not call gh when throttled")
+type syncFixture struct {
+	store    *state.Store
+	cache    *cache.Store
+	executor *recordingExecutor
+	envDir   string
+	prCalls  map[string]int
+	ciCalls  map[string]int
+	mu       sync.Mutex
 }
 
-func TestRunExpensive_SkipsWhenGHUnavailable(t *testing.T) {
-	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
+// newSyncFixture stubs every external dependency of Sync. prs maps branch to
+// the PR gh would report; branches without an entry have no PR.
+func newSyncFixture(t *testing.T, worktreeList string, prs map[string]*github.PRInfo) *syncFixture {
+	t.Helper()
+	f := &syncFixture{
+		store:    setupTestEnv(t),
+		cache:    cache.NewStore(),
+		executor: &recordingExecutor{output: worktreeList},
+		prCalls:  map[string]int{},
+		ciCalls:  map[string]int{},
+	}
 
+	maintenance.SetIsGHAvailable(func() bool { return true })
+	t.Cleanup(maintenance.RestoreIsGHAvailable)
+	maintenance.SetNewExecutor(func(env *procenv.Env) command.Executor {
+		f.envDir = env.Dir
+		return f.executor
+	})
+	t.Cleanup(maintenance.RestoreNewExecutor)
+	maintenance.SetGetPRForBranch(func(_ context.Context, branch string) (*github.PRInfo, error) {
+		f.mu.Lock()
+		f.prCalls[branch]++
+		f.mu.Unlock()
+		return prs[branch], nil
+	})
+	t.Cleanup(maintenance.RestoreGetPRForBranch)
+	maintenance.SetGetCIStatus(func(_ context.Context, branch string) (*github.CIStatus, error) {
+		f.mu.Lock()
+		f.ciCalls[branch]++
+		f.mu.Unlock()
+		return &github.CIStatus{State: "passing", Total: 2, Passing: 2}, nil
+	})
+	t.Cleanup(maintenance.RestoreGetCIStatus)
+	maintenance.SetIsWorktreeDirty(func(_, _ string) (bool, error) { return false, nil })
+	t.Cleanup(maintenance.RestoreIsWorktreeDirty)
+	maintenance.SetBusyPaths(nil)
+	t.Cleanup(maintenance.RestoreBusyPaths)
+	return f
+}
+
+func (f *syncFixture) run(t *testing.T) (result maintenance.Result, warnings string) {
+	t.Helper()
+	var buf bytes.Buffer
+	runner := maintenance.NewRunner(f.store, f.cache, repoID(), "/main", &buf)
+	result, err := runner.Sync(t.Context())
+	require.NoError(t, err)
+	return result, buf.String()
+}
+
+func TestSync_ReturnsErrGHUnavailable(t *testing.T) {
+	store := setupTestEnv(t)
 	maintenance.SetIsGHAvailable(func() bool { return false })
 	t.Cleanup(maintenance.RestoreIsGHAvailable)
 
-	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunExpensive(context.Background()))
+	runner := maintenance.NewRunner(store, cache.NewStore(), repoID(), "/main", &bytes.Buffer{})
+	_, err := runner.Sync(t.Context())
+	assert.ErrorIs(t, err, maintenance.ErrGHUnavailable)
 }
 
-func TestRunExpensive_AutoArchivesMergedPR(t *testing.T) {
-	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
+func TestSync_RunsInMainWorktree(t *testing.T) {
+	f := newSyncFixture(t, porcelain(wtEntry("/main", "aaa", "main")), nil)
+	f.run(t)
+	assert.Equal(t, "/main", f.envDir, "subprocesses must not depend on the caller's directory")
+}
 
-	output := porcelain(
+func TestSync_AutoArchivesMergedAndClosedPRs(t *testing.T) {
+	f := newSyncFixture(t, porcelain(
 		wtEntry("/main", "aaa", "main"),
 		wtEntry("/wt/feat", "bbb111", "feat"),
-	)
-
-	maintenance.SetIsGHAvailable(func() bool { return true })
-	t.Cleanup(maintenance.RestoreIsGHAvailable)
-
-	maintenance.SetNewExecutor(func() command.Executor {
-		return &mockExecutor{output: output}
+		wtEntry("/wt/fix", "ccc222", "fix"),
+	), map[string]*github.PRInfo{
+		"feat": {Number: 42, State: github.StateMerged},
+		"fix":  {Number: 7, State: github.StateClosed},
 	})
-	t.Cleanup(maintenance.RestoreNewExecutor)
 
-	maintenance.SetGetPRForBranch(func(_ context.Context, branch string) (*github.PRInfo, error) {
-		if branch == "feat" {
-			return &github.PRInfo{Number: 42, State: github.StateMerged}, nil
-		}
-		return nil, nil
-	})
-	t.Cleanup(maintenance.RestoreGetPRForBranch)
+	result, _ := f.run(t)
 
-	maintenance.SetIsWorktreeDirty(func(_, _ string) (bool, error) { return false, nil })
-	t.Cleanup(maintenance.RestoreIsWorktreeDirty)
+	require.Len(t, result.Archived, 2)
+	assert.Equal(t, "Auto-archived feat in owner/repo (PR #42 MERGED)", result.Archived[0].String())
+	assert.Equal(t, "Auto-archived fix in owner/repo (PR #7 CLOSED)", result.Archived[1].String())
 
-	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunExpensive(context.Background()))
-
-	st, err := store.Load()
+	st, err := f.store.Load()
 	require.NoError(t, err)
-
-	ws, ok := st.Worktrees[id.StateKey("feat")]
-	require.True(t, ok)
+	ws := st.Worktrees[repoID().StateKey("feat")]
 	assert.True(t, ws.Archived)
 	assert.Equal(t, "bbb111", ws.CommitSHA)
-	assert.Contains(t, buf.String(), "Auto-archived feat (PR #42 MERGED)")
+	assert.Zero(t, f.ciCalls["feat"], "CI is irrelevant for a PR being archived")
 }
 
-func TestRunExpensive_AutoArchivesClosedPR(t *testing.T) {
-	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
-
-	output := porcelain(
+func TestSync_RefreshesCacheForOpenPRs(t *testing.T) {
+	f := newSyncFixture(t, porcelain(
 		wtEntry("/main", "aaa", "main"),
-		wtEntry("/wt/fix", "ccc222", "fix"),
-	)
+		wtEntry("/wt/open", "bbb", "open"),
+		wtEntry("/wt/nopr", "ccc", "nopr"),
+	), map[string]*github.PRInfo{"open": {Number: 3, State: "OPEN", Title: "Open PR"}})
 
-	maintenance.SetIsGHAvailable(func() bool { return true })
-	t.Cleanup(maintenance.RestoreIsGHAvailable)
+	result, _ := f.run(t)
+	assert.Equal(t, 2, result.Checked)
+	assert.Empty(t, result.Archived)
 
-	maintenance.SetNewExecutor(func() command.Executor {
-		return &mockExecutor{output: output}
-	})
-	t.Cleanup(maintenance.RestoreNewExecutor)
-
-	maintenance.SetGetPRForBranch(func(_ context.Context, branch string) (*github.PRInfo, error) {
-		if branch == "fix" {
-			return &github.PRInfo{Number: 7, State: github.StateClosed}, nil
-		}
-		return nil, nil
-	})
-	t.Cleanup(maintenance.RestoreGetPRForBranch)
-
-	maintenance.SetIsWorktreeDirty(func(_, _ string) (bool, error) { return false, nil })
-	t.Cleanup(maintenance.RestoreIsWorktreeDirty)
-
-	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunExpensive(context.Background()))
-
-	st, err := store.Load()
-	require.NoError(t, err)
-
-	ws, ok := st.Worktrees[id.StateKey("fix")]
+	open, ok := f.cache.Get(repoID().StateKey("open"))
 	require.True(t, ok)
-	assert.True(t, ws.Archived)
-	assert.Contains(t, buf.String(), "Auto-archived fix (PR #7 CLOSED)")
+	assert.Equal(t, 3, open.PRNumber)
+	assert.Equal(t, "✓ CI passing", open.CIStatus)
+
+	nopr, ok := f.cache.Get(repoID().StateKey("nopr"))
+	require.True(t, ok, "branches without a PR are cached so list knows they were checked")
+	assert.Zero(t, nopr.PRNumber)
+	assert.Zero(t, f.ciCalls["nopr"])
 }
 
-func TestRunExpensive_SkipsDirtyWorktree(t *testing.T) {
-	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
-
-	output := porcelain(
+func TestSync_SkipsDirtyWorktree(t *testing.T) {
+	f := newSyncFixture(t, porcelain(
 		wtEntry("/main", "aaa", "main"),
-		wtEntry("/wt/dirty", "ddd333", "dirty"),
-	)
-
-	maintenance.SetIsGHAvailable(func() bool { return true })
-	t.Cleanup(maintenance.RestoreIsGHAvailable)
-
-	maintenance.SetNewExecutor(func() command.Executor {
-		return &mockExecutor{output: output}
-	})
-	t.Cleanup(maintenance.RestoreNewExecutor)
-
-	maintenance.SetGetPRForBranch(func(_ context.Context, _ string) (*github.PRInfo, error) {
-		return &github.PRInfo{Number: 10, State: github.StateMerged}, nil
-	})
-	t.Cleanup(maintenance.RestoreGetPRForBranch)
-
+		wtEntry("/wt/dirty", "ddd", "dirty"),
+	), map[string]*github.PRInfo{"dirty": {Number: 10, State: github.StateMerged}})
 	maintenance.SetIsWorktreeDirty(func(_, _ string) (bool, error) { return true, nil })
-	t.Cleanup(maintenance.RestoreIsWorktreeDirty)
 
-	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunExpensive(context.Background()))
+	result, out := f.run(t)
 
-	st, err := store.Load()
-	require.NoError(t, err)
-	assert.Empty(t, st.Worktrees)
-	assert.Contains(t, buf.String(), "Skipped auto-archive of dirty: worktree has uncommitted changes")
+	assert.Empty(t, result.Archived)
+	assert.Contains(t, out, "Skipped auto-archive of dirty: worktree has uncommitted changes")
+	entry, ok := f.cache.Get(repoID().StateKey("dirty"))
+	require.True(t, ok, "a merged PR that was not archived still shows in list")
+	assert.Equal(t, github.StateMerged, entry.PRState)
 }
 
-func TestRunExpensive_SkipsSuppressedBranches(t *testing.T) {
-	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
+func TestSync_SkipsWorktreeInUse(t *testing.T) {
+	f := newSyncFixture(t, porcelain(
+		wtEntry("/main", "aaa", "main"),
+		wtEntry("/wt/busy", "eee", "busy"),
+		wtEntry("/wt/busy-sibling", "fff", "busy-sibling"),
+	), map[string]*github.PRInfo{
+		"busy":         {Number: 1, State: github.StateMerged},
+		"busy-sibling": {Number: 2, State: github.StateMerged},
+	})
+	maintenance.SetBusyPaths([]string{"/", "/wt/busy/src"})
 
-	// Pre-populate state with SuppressAutoArchive
-	require.NoError(t, store.Save(state.State{
-		Worktrees: map[string]state.WorktreeState{
-			id.StateKey("suppressed"): {SuppressAutoArchive: true},
-		},
+	result, out := f.run(t)
+
+	require.Len(t, result.Archived, 1, "a path prefix match must not catch a sibling directory")
+	assert.Equal(t, "busy-sibling", result.Archived[0].Branch)
+	assert.Contains(t, out, "Skipped auto-archive of busy: worktree is in use by a running process")
+}
+
+func TestSync_SkipsSuppressedAndArchivedBranches(t *testing.T) {
+	f := newSyncFixture(t, porcelain(
+		wtEntry("/main", "aaa", "main"),
+		wtEntry("/wt/suppressed", "eee", "suppressed"),
+		wtEntry("/wt/detached", "fff", ""),
+	), nil)
+	require.NoError(t, f.store.Save(state.State{
+		Worktrees: map[string]state.WorktreeState{repoID().StateKey("suppressed"): {SuppressAutoArchive: true}},
 	}))
 
-	output := porcelain(
+	result, _ := f.run(t)
+
+	assert.Zero(t, result.Checked)
+	assert.Empty(t, f.prCalls)
+}
+
+func TestSync_ReportsPerBranchFailures(t *testing.T) {
+	f := newSyncFixture(t, porcelain(
 		wtEntry("/main", "aaa", "main"),
-		wtEntry("/wt/suppressed", "eee444", "suppressed"),
-	)
-
-	maintenance.SetIsGHAvailable(func() bool { return true })
-	t.Cleanup(maintenance.RestoreIsGHAvailable)
-
-	maintenance.SetNewExecutor(func() command.Executor {
-		return &mockExecutor{output: output}
+		wtEntry("/wt/broken", "bbb", "broken"),
+	), nil)
+	maintenance.SetGetPRForBranch(func(context.Context, string) (*github.PRInfo, error) {
+		return nil, errors.New("rate limited")
 	})
-	t.Cleanup(maintenance.RestoreNewExecutor)
 
-	prCalled := false
-	maintenance.SetGetPRForBranch(func(_ context.Context, _ string) (*github.PRInfo, error) {
-		prCalled = true
-		return &github.PRInfo{Number: 1, State: github.StateMerged}, nil
-	})
-	t.Cleanup(maintenance.RestoreGetPRForBranch)
+	result, out := f.run(t)
 
-	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunExpensive(context.Background()))
-
-	assert.False(t, prCalled, "should not check PR for suppressed branch")
+	assert.Equal(t, 1, result.Failed)
+	assert.Contains(t, out, "failed to check PR for broken: rate limited")
+	_, ok := f.cache.Get(repoID().StateKey("broken"))
+	assert.False(t, ok, "failed fetches must not poison the cache")
 }
 
-func TestRunExpensive_TouchesThrottleFile(t *testing.T) {
-	store := setupTestEnv(t)
-	id := repoID()
-	cfg := defaultCfg()
-
-	output := porcelain(wtEntry("/main", "aaa", "main"))
-
-	maintenance.SetIsGHAvailable(func() bool { return true })
-	t.Cleanup(maintenance.RestoreIsGHAvailable)
-
-	maintenance.SetNewExecutor(func() command.Executor {
-		return &mockExecutor{output: output}
-	})
-	t.Cleanup(maintenance.RestoreNewExecutor)
-
-	var buf bytes.Buffer
-	runner := maintenance.NewRunner(store, cfg, id, "/tmp/repo", &buf)
-	require.NoError(t, runner.RunExpensive(context.Background()))
-
-	tFile := filepath.Join(os.Getenv("XDG_DATA_HOME"), "wtp", "maintenance", "owner--repo")
-	_, err := os.Stat(tFile)
-	assert.NoError(t, err, "throttle file should exist after RunExpensive")
-}
-
-func TestRunExpensive_PerRepoThrottleIsolation(t *testing.T) {
-	store := setupTestEnv(t)
-	cfg := defaultCfg()
-
-	id1 := &remote.RepoIdentifier{Owner: "owner", Repo: "repo1"}
-	id2 := &remote.RepoIdentifier{Owner: "owner", Repo: "repo2"}
-
-	output := porcelain(wtEntry("/main", "aaa", "main"))
-
-	maintenance.SetIsGHAvailable(func() bool { return true })
-	t.Cleanup(maintenance.RestoreIsGHAvailable)
-
-	maintenance.SetNewExecutor(func() command.Executor {
-		return &mockExecutor{output: output}
-	})
-	t.Cleanup(maintenance.RestoreNewExecutor)
-
-	// Run for repo1
-	var buf1 bytes.Buffer
-	r1 := maintenance.NewRunner(store, cfg, id1, "/tmp/repo1", &buf1)
-	require.NoError(t, r1.RunExpensive(context.Background()))
-
-	tDir := filepath.Join(os.Getenv("XDG_DATA_HOME"), "wtp", "maintenance")
-	_, err := os.Stat(filepath.Join(tDir, "owner--repo1"))
-	assert.NoError(t, err, "repo1 throttle file should exist")
-
-	_, err = os.Stat(filepath.Join(tDir, "owner--repo2"))
-	assert.True(t, os.IsNotExist(err), "repo2 throttle file should not exist")
-
-	// Run for repo2
-	var buf2 bytes.Buffer
-	r2 := maintenance.NewRunner(store, cfg, id2, "/tmp/repo2", &buf2)
-	require.NoError(t, r2.RunExpensive(context.Background()))
-
-	_, err = os.Stat(filepath.Join(tDir, "owner--repo2"))
-	assert.NoError(t, err, "repo2 throttle file should exist after run")
+func TestParseLsofNames(t *testing.T) {
+	out := []byte("p613\nfcwd\nn/\np967\nfcwd\nn/Users/me/wt/feat\n")
+	assert.Equal(t, []string{"/", "/Users/me/wt/feat"}, maintenance.ParseLsofNames(out))
 }

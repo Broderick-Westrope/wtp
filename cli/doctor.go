@@ -8,13 +8,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
+	"github.com/Broderick-Westrope/wtp/v3/internal/config"
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
 	"github.com/Broderick-Westrope/wtp/v3/internal/github"
+	"github.com/Broderick-Westrope/wtp/v3/internal/launchd"
+	"github.com/Broderick-Westrope/wtp/v3/internal/maintenance"
 	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
@@ -27,10 +31,11 @@ var doctorIsGHAvailable = github.IsAvailable
 // newDoctorCommand creates the doctor command.
 func newDoctorCommand() *cli.Command {
 	return &cli.Command{
-		Name:        "doctor",
-		Usage:       "Diagnose common wtp issues",
-		Description: "Checks for v2 worktrees, orphaned state entries, orphaned directories, and gh CLI status.",
-		Action:      doctorCommand,
+		Name:  "doctor",
+		Usage: "Diagnose common wtp issues",
+		Description: "Checks for v2 worktrees, orphaned state entries, orphaned directories, gh CLI status, " +
+			"and the background sync agent.",
+		Action: doctorCommand,
 	}
 }
 
@@ -89,6 +94,9 @@ func doctorCommand(ctx context.Context, cmd *cli.Command) error {
 
 	// 4. gh CLI status
 	issueCount += checkGHStatus(ctx, w, cwd)
+
+	// 5. Background sync agent
+	issueCount += checkSyncAgent(w)
 
 	// Summary
 	if issueCount == 0 {
@@ -264,4 +272,65 @@ func checkGHStatus(ctx context.Context, w io.Writer, dir string) int {
 		_, _ = fmt.Fprintln(w, "✓ gh authenticated")
 	}
 	return count
+}
+
+// staleSyncFactor is how many maintenance intervals may pass without a full
+// sync before doctor reports the agent as not running.
+const staleSyncFactor = 3
+
+// checkSyncAgent checks that the launchd agent that keeps PR/CI status and
+// auto-archive current is installed, points at a binary that still exists and
+// has run recently. Only macOS has an agent to check. Returns number of
+// issues found.
+func checkSyncAgent(w io.Writer) int {
+	if syncGOOS != "darwin" {
+		return 0
+	}
+
+	plistPath, err := syncPlistPath()
+	if err != nil {
+		_, _ = fmt.Fprintf(w, "⚠ Could not locate background sync agent: %v\n", err)
+		return 1
+	}
+	plist, err := launchd.Installed(plistPath)
+	if stderrors.Is(err, launchd.ErrNotInstalled) {
+		_, _ = fmt.Fprintln(w, "⚠ Background sync agent not installed "+
+			"(PR/CI status and auto-archive only update on 'wtp sync')")
+		_, _ = fmt.Fprintln(w, "  Run: wtp sync --install")
+		return 1
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(w, "⚠ Could not read background sync agent: %v\n", err)
+		return 1
+	}
+
+	program, err := launchd.ProgramPath(plist)
+	if err != nil {
+		_, _ = fmt.Fprintf(w, "✗ Background sync agent plist is malformed: %v\n", err)
+		_, _ = fmt.Fprintln(w, "  Run: wtp sync --install")
+		return 1
+	}
+	if _, statErr := os.Stat(program); statErr != nil {
+		_, _ = fmt.Fprintf(w, "✗ Background sync agent points at a missing binary: %s\n", program)
+		_, _ = fmt.Fprintln(w, "  Run: wtp sync --install")
+		return 1
+	}
+	_, _ = fmt.Fprintln(w, "✓ Background sync agent installed")
+
+	cfg, err := config.LoadGlobalConfig()
+	if err != nil {
+		return 0
+	}
+	staleAfter := time.Duration(staleSyncFactor)*cfg.MaintenanceInterval + launchd.DefaultTickMinutes*time.Minute
+	last, ok := maintenance.LastFullSync()
+	switch {
+	case !ok:
+		// A fresh install has not reached its first tick yet; not an issue.
+		_, _ = fmt.Fprintln(w, "  No background sync has completed yet")
+	case time.Since(last) > staleAfter:
+		_, _ = fmt.Fprintf(w, "⚠ Last background sync was %s ago\n", time.Since(last).Truncate(time.Minute))
+		_, _ = fmt.Fprintf(w, "  Check the log: %s\n", maintenance.LogPath())
+		return 1
+	}
+	return 0
 }

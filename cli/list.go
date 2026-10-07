@@ -5,18 +5,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
 	"github.com/urfave/cli/v3"
-	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/cache"
@@ -69,18 +68,19 @@ var (
 		}
 		return width
 	}
-	listIsGHAvailable  = github.IsAvailable
-	listGetPRForBranch = github.GetPRForBranch
-	listGetCIStatus    = github.GetCIStatus
+	listIsGHAvailable       = github.IsAvailable
+	listSpawnBackgroundSync = spawnBackgroundSync
 )
 
 // newListCommand creates the list command definition
 func newListCommand() *cli.Command {
 	return &cli.Command{
-		Name:          "list",
-		Aliases:       []string{"ls"},
-		Usage:         "List all worktrees",
-		Description:   "Shows all worktrees with their branches, PR/CI status, and HEAD commits.",
+		Name:    "list",
+		Aliases: []string{"ls"},
+		Usage:   "List all worktrees",
+		Description: "Shows all worktrees with their branches, PR/CI status, and HEAD commits.\n\n" +
+			"PR/CI status comes from the local cache, so listing never waits on GitHub. When it is " +
+			"older than cache_ttl, a background 'wtp sync' refreshes it for the next listing.",
 		ShellComplete: completeList,
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
@@ -105,7 +105,7 @@ func newListCommand() *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:  "no-sync",
-				Usage: "Skip gh calls and auto-archive",
+				Usage: "Don't start a background refresh of stale PR/CI status",
 			},
 		},
 		Action: listCommand,
@@ -212,9 +212,11 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 	prciData := make(map[string]worktreePRCI)
 	ghAvailable := listIsGHAvailable()
 
-	if ghAvailable && !opts.NoSync && !opts.Quiet && repoID != nil {
-		if err := fetchPRCIData(ctx, mainRepoPath, displayWorktrees, repoID, archivedBranches, prciData); err != nil {
-			return err
+	if ghAvailable && !opts.Quiet && repoID != nil {
+		globalCfg, _ := config.LoadGlobalConfig()
+		stale := loadPRCIFromCache(displayWorktrees, repoID, archivedBranches, prciData, globalCfg.CacheTTL)
+		if stale && !opts.NoSync {
+			listSpawnBackgroundSync(ctx)
 		}
 	} else if !ghAvailable && !opts.Quiet {
 		maybeShowGHNotAvailableHint(stderrFor(ctx))
@@ -235,7 +237,7 @@ func listCommandWithCommandExecutor( //nolint:gocyclo // orchestrates many disti
 
 // prciFromCache builds a worktreePRCI entry from a cached record.
 func prciFromCache(cached *cache.WorktreeCache) worktreePRCI {
-	prFmt := ""
+	prFmt := github.FormatPRState(nil)
 	if cached.PRNumber > 0 {
 		prFmt = github.FormatPRState(&github.PRInfo{
 			Number: cached.PRNumber,
@@ -248,129 +250,58 @@ func prciFromCache(cached *cache.WorktreeCache) worktreePRCI {
 	}
 }
 
-// prciSharedState holds the shared mutable state passed to per-branch fetch goroutines.
-type prciSharedState struct {
-	mu         sync.Mutex
-	errorCount atomic.Int32
-	newEntries map[string]cache.WorktreeCache
-	prciData   map[string]worktreePRCI
-}
-
-// fetchPRCIForBranch fetches PR/CI data for a single branch and updates shared state.
-// Network calls are made outside the lock; only map writes are protected by mu.
-func fetchPRCIForBranch(
-	ctx context.Context,
-	mainRepoPath string,
-	wt git.Worktree,
-	key string,
-	cacheStore *cache.Store,
-	ttl time.Duration,
-	shared *prciSharedState,
-) error {
-	// Use cached data if fresh
-	if cached, ok := cacheStore.Get(key); ok && !cacheStore.IsExpired(&cached, ttl) {
-		shared.mu.Lock()
-		shared.prciData[wt.Branch] = prciFromCache(&cached)
-		shared.mu.Unlock()
-		return nil
-	}
-
-	// Fetch fresh data — network calls outside the lock.
-	// CI checks require a PR, so skip the CI call when there's no PR to avoid
-	// a wasted round-trip that always returns "no pull requests found".
-	pr, prErr := listGetPRForBranch(ctx, mainRepoPath, wt.Branch)
-	var ci *github.CIStatus
-	var ciErr error
-	if pr != nil {
-		ci, ciErr = listGetCIStatus(ctx, mainRepoPath, wt.Branch)
-	}
-	if prErr != nil || ciErr != nil {
-		shared.errorCount.Add(1)
-	}
-
-	prFmt := github.FormatPRState(pr)
-	ciFmt := github.FormatCIStatus(ci)
-
-	updateSharedWithFreshData(wt.Branch, key, pr, prErr, ciErr, prFmt, ciFmt, shared)
-
-	return nil
-}
-
-// updateSharedWithFreshData writes freshly-fetched PR/CI data into shared state
-// under the mutex.
-func updateSharedWithFreshData(
-	branch, key string,
-	pr *github.PRInfo,
-	prErr, ciErr error,
-	prFmt, ciFmt string,
-	shared *prciSharedState,
-) {
-	shared.mu.Lock()
-	defer shared.mu.Unlock()
-
-	// Only cache successful fetches — partial failures would poison the
-	// cache with PRNumber=0/PRState="" and suppress fresh attempts until
-	// the TTL expires.
-	if prErr == nil && ciErr == nil {
-		entry := cache.WorktreeCache{CIStatus: ciFmt}
-		if pr != nil {
-			entry.PRNumber = pr.Number
-			entry.PRState = pr.State
-			entry.PRTitle = pr.Title
-		}
-		shared.newEntries[key] = entry
-	}
-
-	shared.prciData[branch] = worktreePRCI{
-		prFmt: prFmt,
-		ciFmt: ciFmt,
-	}
-}
-
-// fetchPRCIData fetches PR/CI info for non-main non-detached worktrees, updating prciData
-// in-place. Fetches across branches are parallelized using errgroup.
-// Archived branches are skipped — they no longer exist in git.
-// Auto-archive is handled by the maintenance system, not list.
-func fetchPRCIData(
-	ctx context.Context,
-	mainRepoPath string,
+// loadPRCIFromCache fills prciData from the PR/CI cache without touching the
+// network, and reports whether any displayed branch is missing from the cache
+// or older than ttl. Archived branches are skipped — they no longer exist in
+// git. The cache is kept current by `wtp sync`.
+func loadPRCIFromCache(
 	worktrees []git.Worktree,
 	repoID *remote.RepoIdentifier,
 	archivedBranches map[string]bool,
 	prciData map[string]worktreePRCI,
-) error {
-	cacheStore := cache.NewStore()
-	globalCfg, _ := config.LoadGlobalConfig()
-	ttl := globalCfg.CacheTTL
-
-	shared := &prciSharedState{
-		newEntries: make(map[string]cache.WorktreeCache),
-		prciData:   prciData,
+	ttl time.Duration,
+) bool {
+	c, err := cache.NewStore().Load()
+	if err != nil {
+		return true
 	}
 
-	g, gCtx := errgroup.WithContext(ctx)
-
+	stale := false
 	for _, wt := range worktrees {
 		if wt.Branch == "" || wt.Branch == git.DetachedKeyword || wt.IsMain || archivedBranches[wt.Branch] {
 			continue
 		}
-
-		key := repoID.StateKey(wt.Branch)
-		g.Go(func() error {
-			return fetchPRCIForBranch(gCtx, mainRepoPath, wt, key, cacheStore, ttl, shared)
-		})
+		entry, ok := c.Worktrees[repoID.StateKey(wt.Branch)]
+		if !ok {
+			stale = true
+			continue
+		}
+		if time.Since(entry.UpdatedAt) > ttl {
+			stale = true
+		}
+		prciData[wt.Branch] = prciFromCache(&entry)
 	}
+	return stale
+}
 
-	if err := g.Wait(); err != nil {
-		return err
+// spawnBackgroundSync starts a detached `wtp sync --background` for the
+// current repository so the next list shows fresh PR/CI status, without this
+// one waiting on GitHub. The child takes the sync lock, so a refresh already
+// in flight (or the scheduled agent) makes it exit immediately.
+func spawnBackgroundSync(ctx context.Context) {
+	env := procenv.From(ctx)
+	if len(env.Self) == 0 || env.Dir == "" {
+		return
 	}
-
-	if count := shared.errorCount.Load(); count > 0 {
-		_, _ = fmt.Fprintf(stderrFor(ctx), "warning: failed to fetch PR/CI status for %d branch(es)\n", count)
+	args := append(slices.Clone(env.Self[1:]), syncCommandName, "--"+backgroundFlag)
+	cmd := exec.Command(env.Self[0], args...)
+	cmd.Dir = env.Dir
+	cmd.Env = env.Environ
+	cmd.SysProcAttr = detachedAttr()
+	if err := cmd.Start(); err != nil {
+		return
 	}
-
-	_ = cacheStore.SetBatch(shared.newEntries)
-	return nil
+	_ = cmd.Process.Release()
 }
 
 // appendArchivedEntries appends synthetic worktree rows for archived state

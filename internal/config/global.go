@@ -20,9 +20,9 @@ const (
 	// become eligible for permanent cleanup (10 days).
 	DefaultArchiveRetention = 240 * time.Hour
 
-	// DefaultMaintenanceInterval is the default interval between background
-	// maintenance sweeps.
-	DefaultMaintenanceInterval = 10 * time.Minute
+	// DefaultMaintenanceInterval is the default interval between scheduled
+	// background syncs with GitHub (see `wtp sync --install`).
+	DefaultMaintenanceInterval = time.Hour
 
 	globalConfigFileName    = "config.yml"
 	globalConfigPermissions = 0o600
