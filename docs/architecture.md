@@ -112,7 +112,7 @@ Per-invocation state is never stored in package variables: `Run` resolves the
 the working directory, streams and environment from there (`procenv.From(ctx)`).
 Subprocesses (git, gh, fzf, hooks) run with that directory and environment.
 A stream counts as a terminal only if it is an `*os.File` attached to one, so
-embedding with in-memory writers disables interactive behaviour such as the fzf picker.
+embedding with in-memory streams disables interactive behaviour such as the fzf picker.
 
 When adding code under `cli/` or `internal/`, do not read `os.Getwd`, `os.Std*`,
 `os.Getenv`/`os.Environ` or `os.Args` directly; take them from `procenv`.

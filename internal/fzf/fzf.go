@@ -17,7 +17,7 @@ var ErrCanceled = errors.New("selection canceled")
 // Finder selects an item from a list via interactive fuzzy matching.
 type Finder interface {
 	// Available reports whether fzf can be used: it is installed and on PATH
-	// and the environment has a terminal to draw on.
+	// and the environment is attached to a terminal.
 	Available() bool
 
 	// Find presents items via fzf and returns the selected item.
@@ -43,10 +43,14 @@ func NewFinder(env *procenv.Env) *ExecFinder {
 // fzfExitInterrupted is fzf's exit code for Ctrl-C / Esc.
 const fzfExitInterrupted = 130
 
+var isTerminal = procenv.IsTerminal
+
 // Available reports whether fzf is installed and on PATH and the environment's
-// stderr is a terminal fzf can draw on.
+// stdin is a terminal. Stdin is checked rather than stdout or stderr because
+// fzf draws on /dev/tty, and the shell hook captures stdout and discards
+// stderr while leaving stdin attached to the terminal.
 func (f *ExecFinder) Available() bool {
-	if !procenv.IsTerminal(f.env.Stderr) {
+	if !isTerminal(f.env.Stdin) {
 		return false
 	}
 	_, err := exec.LookPath("fzf")

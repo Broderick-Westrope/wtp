@@ -2,6 +2,8 @@ package fzf
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,6 +29,26 @@ func TestExecFinder_UnavailableWithoutTerminal(t *testing.T) {
 	f := NewFinder(&procenv.Env{Stdin: &buf, Stdout: &buf, Stderr: &buf})
 
 	assert.False(t, f.Available())
+}
+
+func TestExecFinder_AvailabilityFollowsStdinTerminal(t *testing.T) {
+	binDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "fzf"), []byte("#!/bin/sh\n"), 0o755))
+	t.Setenv("PATH", binDir)
+
+	terminal := &bytes.Buffer{}
+	isTerminal = func(stream any) bool { return stream == terminal }
+	t.Cleanup(func() { isTerminal = procenv.IsTerminal })
+
+	t.Run("stdin terminal with captured stdout and discarded stderr", func(t *testing.T) {
+		f := NewFinder(&procenv.Env{Stdin: terminal, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		assert.True(t, f.Available())
+	})
+
+	t.Run("stdin not a terminal", func(t *testing.T) {
+		f := NewFinder(&procenv.Env{Stdin: &bytes.Buffer{}, Stdout: terminal, Stderr: terminal})
+		assert.False(t, f.Available())
+	})
 }
 
 func TestErrCanceled(t *testing.T) {
