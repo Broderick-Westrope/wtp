@@ -68,6 +68,15 @@ func GitBranchForceDelete(branchName string) Command {
 	return GitBranchDelete(branchName, true)
 }
 
+// GitIsAncestor builds a command that exits zero when ancestor is an ancestor
+// of (or equal to) descendant.
+func GitIsAncestor(ancestor, descendant string) Command {
+	return Command{
+		Name: "git",
+		Args: []string{"merge-base", "--is-ancestor", ancestor, descendant},
+	}
+}
+
 // GitWorktreeRemove builds a git worktree remove command
 func GitWorktreeRemove(path string, force bool) Command {
 	args := []string{"worktree", "remove"}

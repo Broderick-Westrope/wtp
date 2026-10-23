@@ -9,10 +9,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/github"
 )
 
 // ===== Command Structure Tests =====
@@ -245,7 +247,7 @@ func TestRemoveCommand_CommandConstruction(t *testing.T) {
 			forceFlag := tt.flags["force"] == true
 			keepFlag := tt.flags["keep"] == true
 			err := removeCommandWithCommandExecutor(
-				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.worktreeName, forceFlag, keepFlag, false,
+				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.worktreeName, forceFlag, keepFlag, false, true,
 			)
 
 			assert.NoError(t, err)
@@ -313,7 +315,7 @@ func TestRemoveCommand_SuccessMessage(t *testing.T) {
 
 			keepFlag := tt.keepFlag
 			err := removeCommandWithCommandExecutor(
-				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.worktreeName, false, keepFlag, false,
+				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.worktreeName, false, keepFlag, false, true,
 			)
 
 			assert.NoError(t, err)
@@ -392,7 +394,7 @@ func TestRemoveCommand_WorktreeNotFound(t *testing.T) {
 	var buf bytes.Buffer
 
 	err := removeCommandWithCommandExecutor(
-		t.Context(), cmd, &buf, mockExec, "/test/repo", "nonexistent", false, false, false,
+		t.Context(), cmd, &buf, mockExec, "/test/repo", "nonexistent", false, false, false, true,
 	)
 
 	assert.Error(t, err)
@@ -414,7 +416,7 @@ func TestRemoveCommand_WorktreeNotFound_ShowsConsistentNames(t *testing.T) {
 	var buf bytes.Buffer
 
 	err := removeCommandWithCommandExecutor(
-		t.Context(), cmd, &buf, mockExec, "/repo", "nonexistent", false, false, false,
+		t.Context(), cmd, &buf, mockExec, "/repo", "nonexistent", false, false, false, true,
 	)
 
 	assert.Error(t, err)
@@ -460,7 +462,7 @@ func TestRemoveCommand_FailsWhenRemovingCurrentWorktree(t *testing.T) {
 			var buf bytes.Buffer
 
 			err := removeCommandWithCommandExecutor(
-				t.Context(), cmd, &buf, mockExec, tt.cwd, "feature/foo", false, false, false,
+				t.Context(), cmd, &buf, mockExec, tt.cwd, "feature/foo", false, false, false, true,
 			)
 
 			assert.Error(t, err)
@@ -492,7 +494,7 @@ func TestRemoveCommand_ExecutionError(t *testing.T) {
 	var buf bytes.Buffer
 
 	err := removeCommandWithCommandExecutor(
-		t.Context(), cmd, &buf, mockExec, "/test/repo", "feature-branch", false, false, false,
+		t.Context(), cmd, &buf, mockExec, "/test/repo", "feature-branch", false, false, false, true,
 	)
 
 	assert.Error(t, err)
@@ -567,7 +569,7 @@ func TestRemoveCommand_DirtyWorktree(t *testing.T) {
 			var buf bytes.Buffer
 
 			err := removeCommandWithCommandExecutor(
-				t.Context(), cmd, &buf, mockExec, "/test/repo", "dirty-feature", tt.forceFlag, false, false)
+				t.Context(), cmd, &buf, mockExec, "/test/repo", "dirty-feature", tt.forceFlag, false, false, true)
 
 			if tt.shouldSucceed {
 				assert.NoError(t, err)
@@ -661,7 +663,7 @@ func TestRemoveCommand_BranchRemovalWithUnmergedCommits(t *testing.T) {
 			var buf bytes.Buffer
 
 			err := removeCommandWithCommandExecutor(
-				t.Context(), cmd, &buf, mockExec, "/test/repo", "feature-unmerged", false, false, tt.forceBranchFlag)
+				t.Context(), cmd, &buf, mockExec, "/test/repo", "feature-unmerged", false, false, tt.forceBranchFlag, true)
 
 			if tt.shouldSucceed {
 				assert.NoError(t, err)
@@ -677,6 +679,126 @@ func TestRemoveCommand_BranchRemovalWithUnmergedCommits(t *testing.T) {
 					assert.Contains(t, err.Error(), expected)
 				}
 			}
+		})
+	}
+}
+
+func TestRemoveCommand_BranchMergedOnGitHub(t *testing.T) {
+	const notMerged = "error: The branch 'feature-squashed' is not fully merged."
+	failed := command.Result{Output: notMerged, Error: &mockRemoveError{message: "exit status 1"}}
+	ok := command.Result{Output: "success"}
+
+	tests := map[string]struct {
+		offline       bool
+		ghAvailable   bool
+		pr            *github.PRInfo
+		prErr         error
+		extraResults  []command.Result
+		wantErr       []string
+		wantOutput    string
+		wantForceDel  bool
+		wantGHChecked bool
+	}{
+		"merged PR at the local tip deletes the branch": {
+			ghAvailable:   true,
+			pr:            &github.PRInfo{Number: 7, State: github.StateMerged, HeadOID: "def456"},
+			extraResults:  []command.Result{ok},
+			wantOutput:    "Removed branch 'feature-squashed' (PR #7 was merged on GitHub)",
+			wantForceDel:  true,
+			wantGHChecked: true,
+		},
+		"merged PR containing the local tip deletes the branch": {
+			ghAvailable:   true,
+			pr:            &github.PRInfo{Number: 7, State: github.StateMerged, HeadOID: "fff999"},
+			extraResults:  []command.Result{ok, ok},
+			wantOutput:    "Removed branch 'feature-squashed' (PR #7 was merged on GitHub)",
+			wantForceDel:  true,
+			wantGHChecked: true,
+		},
+		"local commits beyond the merged PR keep the branch": {
+			ghAvailable:   true,
+			pr:            &github.PRInfo{Number: 7, State: github.StateMerged, HeadOID: "fff999"},
+			extraResults:  []command.Result{{Error: &mockRemoveError{message: "exit status 1"}}},
+			wantErr:       []string{"not fully merged", "PR #7 was merged on GitHub, but the local branch has commits"},
+			wantGHChecked: true,
+		},
+		"open PR keeps the branch": {
+			ghAvailable:   true,
+			pr:            &github.PRInfo{Number: 7, State: "OPEN", HeadOID: "def456"},
+			wantErr:       []string{"not fully merged", "--force-branch"},
+			wantGHChecked: true,
+		},
+		"closed PR keeps the branch": {
+			ghAvailable:   true,
+			pr:            &github.PRInfo{Number: 7, State: github.StateClosed, HeadOID: "def456"},
+			wantErr:       []string{"not fully merged"},
+			wantGHChecked: true,
+		},
+		"no PR keeps the branch": {
+			ghAvailable:   true,
+			wantErr:       []string{"not fully merged"},
+			wantGHChecked: true,
+		},
+		"GitHub lookup failure keeps the branch and explains why": {
+			ghAvailable:   true,
+			prErr:         fmt.Errorf("gh: not authenticated"),
+			wantErr:       []string{"not fully merged", "Could not check GitHub for a merged PR: gh: not authenticated"},
+			wantGHChecked: true,
+		},
+		"gh not installed keeps the branch": {
+			wantErr: []string{"not fully merged"},
+		},
+		"offline skips GitHub": {
+			offline:     true,
+			ghAvailable: true,
+			pr:          &github.PRInfo{Number: 7, State: github.StateMerged, HeadOID: "def456"},
+			wantErr:     []string{"not fully merged"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			origAvailable, origGetPR := removeIsGHAvailable, removeGetPRForBranch
+			t.Cleanup(func() { removeIsGHAvailable, removeGetPRForBranch = origAvailable, origGetPR })
+
+			ghChecked := false
+			removeIsGHAvailable = func() bool { return tc.ghAvailable }
+			removeGetPRForBranch = func(_ context.Context, dir, branch string) (*github.PRInfo, error) {
+				ghChecked = true
+				assert.Equal(t, "/test/repo", dir)
+				assert.Equal(t, "feature-squashed", branch)
+				return tc.pr, tc.prErr
+			}
+
+			mockExec := &mockRemoveCommandExecutor{results: append([]command.Result{
+				{Output: "worktree /path/to/main\nHEAD abc123\nbranch refs/heads/main\n\n" +
+					"worktree /path/to/worktrees/feature-squashed\nHEAD def456\nbranch refs/heads/feature-squashed\n\n"},
+				ok,
+				failed,
+			}, tc.extraResults...)}
+
+			var buf bytes.Buffer
+			err := removeCommandWithCommandExecutor(
+				t.Context(), nil, &buf, mockExec, "/test/repo", "feature-squashed", false, false, false, tc.offline)
+
+			if len(tc.wantErr) == 0 {
+				require.NoError(t, err)
+				assert.Contains(t, buf.String(), tc.wantOutput)
+			} else {
+				require.Error(t, err)
+				for _, want := range tc.wantErr {
+					assert.Contains(t, err.Error(), want)
+				}
+			}
+			assert.Equal(t, tc.wantGHChecked, ghChecked)
+
+			forceDeleted := false
+			for _, c := range mockExec.executedCommands {
+				if len(c.Args) > 1 && c.Args[0] == "branch" && c.Args[1] == "-D" {
+					forceDeleted = true
+				}
+			}
+			assert.Equal(t, tc.wantForceDel, forceDeleted)
 		})
 	}
 }
@@ -729,7 +851,7 @@ func TestRemoveCommand_InternationalCharacters(t *testing.T) {
 			var buf bytes.Buffer
 
 			err := removeCommandWithCommandExecutor(
-				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.branchName, false, false, false,
+				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.branchName, false, false, false, true,
 			)
 
 			assert.NoError(t, err)
@@ -762,7 +884,7 @@ func TestRemoveCommand_PathWithSpaces(t *testing.T) {
 	var buf bytes.Buffer
 
 	err := removeCommandWithCommandExecutor(
-		t.Context(), cmd, &buf, mockExec, "/path/to/main", branchName, false, false, false,
+		t.Context(), cmd, &buf, mockExec, "/path/to/main", branchName, false, false, false, true,
 	)
 
 	assert.NoError(t, err)
@@ -820,7 +942,7 @@ branch refs/heads/test-feature
 			var buf bytes.Buffer
 
 			err := removeCommandWithCommandExecutor(
-				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.input, false, false, false,
+				t.Context(), cmd, &buf, mockExec, "/test/repo", tt.input, false, false, false, true,
 			)
 
 			assert.NoError(t, err)

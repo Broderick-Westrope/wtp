@@ -16,14 +16,19 @@ import (
 	"github.com/Broderick-Westrope/wtp/v3/internal/command"
 	"github.com/Broderick-Westrope/wtp/v3/internal/errors"
 	"github.com/Broderick-Westrope/wtp/v3/internal/git"
+	"github.com/Broderick-Westrope/wtp/v3/internal/github"
 	"github.com/Broderick-Westrope/wtp/v3/internal/procenv"
 	"github.com/Broderick-Westrope/wtp/v3/internal/remote"
 	"github.com/Broderick-Westrope/wtp/v3/internal/state"
 	"github.com/Broderick-Westrope/wtp/v3/internal/xdg"
 )
 
-// Variable to allow mocking in tests
-var removeGetwd = getwd
+// Variables to allow mocking in tests
+var (
+	removeGetwd          = getwd
+	removeIsGHAvailable  = github.IsAvailable
+	removeGetPRForBranch = github.GetPRForBranch
+)
 
 // newRemoveCommand creates the remove command definition
 func newRemoveCommand() *cli.Command {
@@ -33,7 +38,9 @@ func newRemoveCommand() *cli.Command {
 		Usage:     "Remove a worktree",
 		UsageText: "wtp remove <worktree-name>",
 		Description: "Removes the worktree with the specified branch name.\n" +
-			"By default, also deletes the associated branch.\n\n" +
+			"By default, also deletes the associated branch. A branch git does not see as merged\n" +
+			"(e.g. after a squash merge) is still deleted when GitHub reports its PR as merged and\n" +
+			"the local branch has no commits beyond the PR. Use --offline to skip the GitHub check.\n\n" +
 			"Examples:\n" +
 			"  wtp remove feature-old                  # Remove worktree and branch\n" +
 			"  wtp remove -f feature-dirty             # Force remove dirty worktree\n" +
@@ -54,6 +61,10 @@ func newRemoveCommand() *cli.Command {
 				Name:  "force-branch",
 				Usage: "Force branch deletion even if not merged",
 			},
+			&cli.BoolFlag{
+				Name:  "offline",
+				Usage: "Decide whether the branch is merged with git only, without checking GitHub",
+			},
 		},
 		Action: removeCommand,
 	}
@@ -68,6 +79,7 @@ func removeCommand(ctx context.Context, cmd *cli.Command) error {
 	force := cmd.Bool("force")
 	keepBranch := cmd.Bool("keep-branch")
 	forceBranch := cmd.Bool("force-branch")
+	offline := cmd.Bool("offline")
 
 	if err := validateRemoveInput(worktreeName, keepBranch, forceBranch); err != nil {
 		return err
@@ -87,7 +99,8 @@ func removeCommand(ctx context.Context, cmd *cli.Command) error {
 
 	// Use CommandExecutor-based implementation
 	executor := command.NewRealExecutor(procenv.From(ctx))
-	return removeCommandWithCommandExecutor(ctx, cmd, w, executor, cwd, worktreeName, force, keepBranch, forceBranch)
+	return removeCommandWithCommandExecutor(
+		ctx, cmd, w, executor, cwd, worktreeName, force, keepBranch, forceBranch, offline)
 }
 
 func removeCommandWithCommandExecutor(
@@ -97,7 +110,7 @@ func removeCommandWithCommandExecutor(
 	executor command.Executor,
 	cwd string,
 	worktreeName string,
-	force, keepBranch, forceBranch bool,
+	force, keepBranch, forceBranch, offline bool,
 ) error {
 	// Get worktrees using CommandExecutor
 	listCmd := command.GitWorktreeList()
@@ -154,7 +167,8 @@ func removeCommandWithCommandExecutor(
 
 	// Remove branch by default unless --keep-branch is specified
 	if !keepBranch && targetWorktree.Branch != "" {
-		if err := removeBranchWithCommandExecutor(w, executor, targetWorktree.Branch, forceBranch); err != nil {
+		err := removeBranchWithCommandExecutor(ctx, w, executor, cwd, *targetWorktree, forceBranch, offline)
+		if err != nil {
 			return err
 		}
 	}
@@ -189,27 +203,85 @@ func isPathWithin(basePath, targetPath string) bool {
 	return true
 }
 
+// removeBranchWithCommandExecutor deletes the worktree's branch. When git
+// refuses because the branch is not fully merged, which is what a squash or
+// rebase merge looks like locally, it falls back to GitHub (unless offline) and
+// force-deletes the branch if its PR was merged and the local branch has no
+// commits beyond the PR's head.
 func removeBranchWithCommandExecutor(
+	ctx context.Context,
 	w io.Writer,
 	executor command.Executor,
-	branchName string,
-	forceBranch bool,
+	cwd string,
+	wt git.Worktree,
+	forceBranch, offline bool,
 ) error {
-	branchCmd := command.GitBranchDelete(branchName, forceBranch)
-	result, err := executor.Execute([]command.Command{branchCmd})
+	branchName := wt.Branch
+	deleteErr := deleteBranch(executor, branchName, forceBranch)
+	if deleteErr == nil {
+		_, err := fmt.Fprintf(w, "Removed branch '%s'\n", branchName)
+		return err
+	}
+	if forceBranch || offline || !strings.Contains(deleteErr.Error(), "not fully merged") {
+		return errors.BranchRemovalFailed(branchName, deleteErr, forceBranch)
+	}
+
+	pr, note := mergedPRCoveringBranch(ctx, executor, cwd, wt)
+	if pr == nil {
+		if note != "" {
+			deleteErr = fmt.Errorf("%w\n%s", deleteErr, note)
+		}
+		return errors.BranchRemovalFailed(branchName, deleteErr, false)
+	}
+
+	if err := deleteBranch(executor, branchName, true); err != nil {
+		return errors.BranchRemovalFailed(branchName, err, true)
+	}
+	_, err := fmt.Fprintf(w, "Removed branch '%s' (PR #%d was merged on GitHub)\n", branchName, pr.Number)
+	return err
+}
+
+func deleteBranch(executor command.Executor, branchName string, force bool) error {
+	result, err := executor.Execute([]command.Command{command.GitBranchDelete(branchName, force)})
 	if err != nil {
-		return errors.BranchRemovalFailed(branchName, err, forceBranch)
+		return err
 	}
 	if len(result.Results) > 0 && result.Results[0].Error != nil {
-		gitOutput := result.Results[0].Output
-		if gitOutput != "" {
-			combinedError := fmt.Errorf("%w: %s", result.Results[0].Error, gitOutput)
-			return errors.BranchRemovalFailed(branchName, combinedError, forceBranch)
+		if gitOutput := result.Results[0].Output; gitOutput != "" {
+			return fmt.Errorf("%w: %s", result.Results[0].Error, gitOutput)
 		}
-		return errors.BranchRemovalFailed(branchName, result.Results[0].Error, forceBranch)
+		return result.Results[0].Error
 	}
-	_, err = fmt.Fprintf(w, "Removed branch '%s'\n", branchName)
-	return err
+	return nil
+}
+
+// mergedPRCoveringBranch returns the branch's PR when GitHub reports it as
+// merged and every local commit on the branch is part of the PR, so deleting
+// the branch loses nothing. Otherwise it returns nil and, when useful, a note
+// explaining why the branch was kept.
+func mergedPRCoveringBranch(
+	ctx context.Context, executor command.Executor, cwd string, wt git.Worktree,
+) (pr *github.PRInfo, note string) {
+	if wt.HEAD == "" || !removeIsGHAvailable() {
+		return nil, ""
+	}
+	pr, err := removeGetPRForBranch(ctx, cwd, wt.Branch)
+	if err != nil {
+		return nil, fmt.Sprintf("Could not check GitHub for a merged PR: %v", err)
+	}
+	if pr == nil || pr.State != github.StateMerged || pr.HeadOID == "" {
+		return nil, ""
+	}
+	if pr.HeadOID == wt.HEAD {
+		return pr, ""
+	}
+
+	result, err := executor.Execute([]command.Command{command.GitIsAncestor(wt.HEAD, pr.HeadOID)})
+	if err == nil && len(result.Results) > 0 && result.Results[0].Error == nil {
+		return pr, ""
+	}
+	return nil, fmt.Sprintf(
+		"PR #%d was merged on GitHub, but the local branch has commits that are not in it", pr.Number)
 }
 
 // cleanupCentralizedWorktreeDir removes the leaf worktree directory and any empty parent

@@ -24,8 +24,10 @@ the second step? Orphaned branches accumulate. **wtp solution:**
 
 Keep your repository clean. When a feature is truly done, wtp automatically
 removes both the worktree and its branch. Need to keep the branch? Use
-`wtp remove --keep-branch` to preserve it. No more forgotten branches
-cluttering your repo.
+`wtp remove --keep-branch` to preserve it. Squash-merged branches are deleted
+too: when git doesn't see the branch as merged, wtp checks GitHub and deletes
+it if its PR was merged and the branch has no commits beyond the PR. No more
+forgotten branches cluttering your repo.
 
 ### 🛠️ Zero-Setup Development Environments
 
@@ -222,6 +224,7 @@ wtp list --no-sync
 wtp remove feature/auth                            # Removes worktree and branch
 wtp remove --force feature/auth                    # Force removal even if dirty
 wtp remove --force-branch feature/auth             # Force branch deletion if unmerged
+wtp remove --offline feature/auth                  # Use git only, skip the GitHub merged-PR check
 
 # Remove worktree but keep the branch
 wtp remove --keep-branch feature/auth              # Removes worktree, keeps branch

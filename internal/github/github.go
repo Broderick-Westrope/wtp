@@ -38,8 +38,10 @@ type PRInfo struct {
 	State      string
 	Title      string
 	HeadBranch string
-	IsDraft    bool
-	ClosedAt   time.Time
+	// HeadOID is the commit SHA at the tip of the PR's head branch.
+	HeadOID  string
+	IsDraft  bool
+	ClosedAt time.Time
 }
 
 // CIStatus holds aggregated CI check status for a pull request.
@@ -57,6 +59,7 @@ type prViewResponse struct {
 	State       string    `json:"state"`
 	Title       string    `json:"title"`
 	HeadRefName string    `json:"headRefName"`
+	HeadRefOid  string    `json:"headRefOid"`
 	IsDraft     bool      `json:"isDraft"`
 	ClosedAt    time.Time `json:"closedAt"`
 }
@@ -109,7 +112,7 @@ func GetPRForBranch(ctx context.Context, dir, branch string) (*PRInfo, error) {
 	defer cancel()
 
 	cmd := ghCommand(ctx, dir, "pr", "view",
-		"--json", "number,state,title,headRefName,isDraft,closedAt", "--", branch)
+		"--json", "number,state,title,headRefName,headRefOid,isDraft,closedAt", "--", branch)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -137,6 +140,7 @@ func GetPRForBranch(ctx context.Context, dir, branch string) (*PRInfo, error) {
 		State:      resp.State,
 		Title:      resp.Title,
 		HeadBranch: resp.HeadRefName,
+		HeadOID:    resp.HeadRefOid,
 		IsDraft:    resp.IsDraft,
 		ClosedAt:   resp.ClosedAt,
 	}
