@@ -145,6 +145,61 @@ func (r *Repository) GetRemoteURL(remoteName string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
+// Remote is a configured git remote.
+type Remote struct {
+	Name string
+	// URL is the URL as configured, before any url.<base>.insteadOf rewriting.
+	URL string
+}
+
+// Remotes returns the repository's remotes in config order.
+func (r *Repository) Remotes() ([]Remote, error) {
+	cmd := r.gitCommand("config", "--get-regexp", `^remote\..*\.url$`)
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if stdErrors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list remotes: %w", err)
+	}
+
+	var remotes []Remote
+	for line := range strings.Lines(string(output)) {
+		key, url, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			continue
+		}
+		name := strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")
+		remotes = append(remotes, Remote{Name: name, URL: url})
+	}
+	return remotes, nil
+}
+
+// FetchRefspecs returns the remote.<name>.fetch refspecs configured for remote.
+func (r *Repository) FetchRefspecs(remote string) ([]string, error) {
+	cmd := r.gitCommand("config", "--get-all", "remote."+remote+".fetch")
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if stdErrors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read fetch refspecs for remote %q: %w", remote, err)
+	}
+	return strings.Fields(string(output)), nil
+}
+
+// RevParse resolves rev to a full commit SHA.
+func (r *Repository) RevParse(rev string) (string, error) {
+	cmd := r.gitCommand("rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", rev, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 // ExecuteGitCommand executes a git command in the repository directory
 func (r *Repository) ExecuteGitCommand(args ...string) error {
 	cmd := r.gitCommand(args...)

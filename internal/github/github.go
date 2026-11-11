@@ -39,9 +39,13 @@ type PRInfo struct {
 	Title      string
 	HeadBranch string
 	// HeadOID is the commit SHA at the tip of the PR's head branch.
-	HeadOID  string
-	IsDraft  bool
-	ClosedAt time.Time
+	HeadOID string
+	// URL is the PR's web URL, which names the base repository.
+	URL string
+	// IsCrossRepository reports whether the head branch lives in a fork.
+	IsCrossRepository bool
+	IsDraft           bool
+	ClosedAt          time.Time
 }
 
 // CIStatus holds aggregated CI check status for a pull request.
@@ -55,14 +59,18 @@ type CIStatus struct {
 
 // prViewResponse is the JSON structure returned by `gh pr view --json`.
 type prViewResponse struct {
-	Number      int       `json:"number"`
-	State       string    `json:"state"`
-	Title       string    `json:"title"`
-	HeadRefName string    `json:"headRefName"`
-	HeadRefOid  string    `json:"headRefOid"`
-	IsDraft     bool      `json:"isDraft"`
-	ClosedAt    time.Time `json:"closedAt"`
+	Number            int       `json:"number"`
+	State             string    `json:"state"`
+	Title             string    `json:"title"`
+	HeadRefName       string    `json:"headRefName"`
+	HeadRefOid        string    `json:"headRefOid"`
+	URL               string    `json:"url"`
+	IsCrossRepository bool      `json:"isCrossRepository"`
+	IsDraft           bool      `json:"isDraft"`
+	ClosedAt          time.Time `json:"closedAt"`
 }
+
+const prViewFields = "number,state,title,headRefName,headRefOid,url,isCrossRepository,isDraft,closedAt"
 
 // checkEntry is one item in the JSON array returned by `gh pr checks --json`.
 type checkEntry struct {
@@ -108,11 +116,28 @@ func IsAuthenticated(ctx context.Context, dir string) (bool, error) {
 // GetPRForBranch fetches pull request metadata for the given branch, running
 // gh in the repository directory dir. Returns (nil, nil) if no PR exists for the branch.
 func GetPRForBranch(ctx context.Context, dir, branch string) (*PRInfo, error) {
+	return viewPR(ctx, dir, branch)
+}
+
+// GetPR fetches pull request metadata for ref, a PR number or URL, running gh
+// in dir. Unlike GetPRForBranch, a missing PR is an error, since the caller
+// named a specific one.
+func GetPR(ctx context.Context, dir, ref string) (*PRInfo, error) {
+	pr, err := viewPR(ctx, dir, ref)
+	if err != nil {
+		return nil, err
+	}
+	if pr == nil {
+		return nil, fmt.Errorf("no pull request found for %s", ref)
+	}
+	return pr, nil
+}
+
+func viewPR(ctx context.Context, dir, ref string) (*PRInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 
-	cmd := ghCommand(ctx, dir, "pr", "view",
-		"--json", "number,state,title,headRefName,headRefOid,isDraft,closedAt", "--", branch)
+	cmd := ghCommand(ctx, dir, "pr", "view", "--json", prViewFields, "--", ref)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -127,7 +152,7 @@ func GetPRForBranch(ctx context.Context, dir, branch string) (*PRInfo, error) {
 			}
 		}
 
-		return nil, fmt.Errorf("running gh pr view: %w (stderr: %s)", err, stderr.String())
+		return nil, fmt.Errorf("running gh pr view %s: %w (stderr: %s)", ref, err, strings.TrimSpace(stderr.String()))
 	}
 
 	var resp prViewResponse
@@ -141,8 +166,11 @@ func GetPRForBranch(ctx context.Context, dir, branch string) (*PRInfo, error) {
 		Title:      resp.Title,
 		HeadBranch: resp.HeadRefName,
 		HeadOID:    resp.HeadRefOid,
-		IsDraft:    resp.IsDraft,
-		ClosedAt:   resp.ClosedAt,
+		URL:        resp.URL,
+
+		IsCrossRepository: resp.IsCrossRepository,
+		IsDraft:           resp.IsDraft,
+		ClosedAt:          resp.ClosedAt,
 	}
 
 	// Override state for drafts so callers see a single canonical value.

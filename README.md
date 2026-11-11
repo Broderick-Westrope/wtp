@@ -251,27 +251,29 @@ wtp exec @ -- pwd
 
 #### PR Review Workflow
 
-Combine `wtp add`, `wtp exec`, and the `gh` CLI into a shell function for
-one-command PR reviews:
+`wtp add --pr` checks out a GitHub pull request in a worktree. It needs the
+`gh` CLI.
 
 ```bash
-wtp-review() {
-  local branch=$(gh pr view "$1" --json headRefName -q .headRefName)
-  git fetch origin "$branch"
-  if ! wtp add "$branch" --exec "$EDITOR ." 2>/dev/null; then
-    wtp exec "$branch" -- $EDITOR .
-  fi
-}
+wtp add --pr 123                                     # PR in the current repository
+wtp add --pr https://github.com/owner/repo/pull/123  # works from any directory
+wtp add --pr 123 --exec "$EDITOR ."                  # open it for review
 ```
 
-This fetches the PR branch, creates a worktree (or reuses an existing one), and
-opens it in your editor. Works with PR URLs, numbers, or branch names:
-
-```bash
-wtp-review https://github.com/owner/repo/pull/123
-wtp-review 123
-wtp-review feature/some-branch
-```
+- Running it again for the same PR reuses the existing worktree. wtp still
+  fetches, runs `--exec` and changes into it, and tells you if the worktree
+  is behind the PR.
+- PRs from the same repository check out the head branch and track it, so you
+  can push review fixes. For single-branch clones, wtp first adds the branch to
+  the remote's fetch refspecs.
+- PRs from forks are fetched from `refs/pull/<number>/head` into a local
+  branch named `pr/<number>`. Their branch names can't clash with yours.
+- A PR URL finds your clone of the PR's repository. wtp checks the current
+  repository first, then every repository that already has a wtp worktree,
+  and picks the remote whose URL matches (so `upstream` works for fork-based
+  setups).
+- An existing local branch for the PR is never reset. Update it with
+  `git pull` yourself.
 
 > **Note:** `wtp add` requires an `origin` remote to derive the centralized
 > storage path. Local-only repos without remotes are not supported.

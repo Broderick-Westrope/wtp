@@ -30,14 +30,19 @@ func newAddCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "add",
 		Usage:     "Create a new worktree",
-		UsageText: "wtp add <existing-branch>\n       wtp add -b <new-branch> [<commit>]",
+		UsageText: "wtp add <existing-branch>\n       wtp add -b <new-branch> [<commit>]\n       wtp add --pr <number|url>",
 		Description: "Creates a new worktree for the specified branch. If the branch doesn't exist locally " +
 			"but exists on a remote, it will be automatically tracked.\n\n" +
+			"With --pr, fetches a GitHub pull request's head branch and creates a worktree for it, or " +
+			"reuses the worktree if one already exists. A PR URL works from anywhere once its repository " +
+			"has a wtp worktree. PRs from forks get a local branch named pr/<number>. Requires the gh CLI.\n\n" +
 			"Examples:\n" +
 			"  wtp add feature/auth                    # Create worktree from existing branch\n" +
 			"  wtp add -b new-feature                  # Create new branch and worktree\n" +
 			"  wtp add -b hotfix/urgent main           # Create new branch from main commit\n" +
-			"  wtp add -b feature/x --exec \"npm test\" # Execute command in the new worktree",
+			"  wtp add -b feature/x --exec \"npm test\" # Execute command in the new worktree\n" +
+			"  wtp add --pr 123                        # Check out PR #123 in a worktree\n" +
+			"  wtp add --pr https://github.com/o/r/pull/123 --exec \"$EDITOR .\"  # Review a PR",
 		ShellComplete: completeBranches,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -53,6 +58,10 @@ func newAddCommand() *cli.Command {
 				Name:  "stay",
 				Usage: "Don't change to the new worktree directory after creation",
 			},
+			&cli.StringFlag{
+				Name:  "pr",
+				Usage: "Check out a GitHub pull request by number or URL (reuses an existing worktree)",
+			},
 		},
 		Action: addCommand,
 	}
@@ -63,6 +72,11 @@ func addCommand(ctx context.Context, cmd *cli.Command) error {
 	w := stdoutFor(ctx, cmd)
 	// Wrap in FlushingWriter to ensure real-time output for all operations
 	fw := wtpio.NewFlushingWriter(w)
+
+	if cmd.String("pr") != "" {
+		return addPRCommand(ctx, cmd, fw, stderrFor(ctx))
+	}
+
 	// Validate inputs
 	if err := validateAddInput(cmd); err != nil {
 		return err
@@ -132,6 +146,20 @@ func addCommandWithCommandExecutor(
 		return analyzeGitWorktreeError(workTreePath, branchName, gitError, gitOutput)
 	}
 
+	return finishAdd(ctx, cmd, w, errW, cmdExec, cfg, mainRepoPath, workTreePath, branchName)
+}
+
+// finishAdd runs everything that follows a successful `git worktree add`:
+// hooks, --exec, the cd marker and the success message.
+func finishAdd(
+	ctx context.Context,
+	cmd *cli.Command,
+	w io.Writer,
+	errW io.Writer,
+	cmdExec command.Executor,
+	cfg *config.Config,
+	mainRepoPath, workTreePath, branchName string,
+) error {
 	if err := executePostCreateHooks(w, procenv.From(ctx).Environ, cfg, mainRepoPath, workTreePath); err != nil {
 		if _, warnErr := fmt.Fprintf(w, "Warning: Hook execution failed: %v\n", err); warnErr != nil {
 			return warnErr
@@ -453,7 +481,12 @@ func setupRepoAndConfig(ctx context.Context) (*git.Repository, *config.Config, s
 		return nil, nil, "", errors.DirectoryAccessFailed("access current", ".", err)
 	}
 
-	repo, err := newRepository(ctx, cwd)
+	return loadRepoAndConfig(ctx, cwd)
+}
+
+// loadRepoAndConfig opens the repository containing dir and loads its .wtp.yml.
+func loadRepoAndConfig(ctx context.Context, dir string) (*git.Repository, *config.Config, string, error) {
+	repo, err := newRepository(ctx, dir)
 	if err != nil {
 		return nil, nil, "", errors.NotInGitRepository()
 	}
@@ -505,7 +538,7 @@ func getBranches(ctx context.Context, w io.Writer) error {
 		}
 
 		// Skip HEAD references and bare origin
-		if branch == "origin/HEAD" || branch == "origin" {
+		if branch == "origin/HEAD" || branch == defaultRemote {
 			continue
 		}
 
